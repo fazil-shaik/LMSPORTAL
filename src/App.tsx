@@ -131,6 +131,7 @@ export default function App() {
         navigate={navigate}
         user={user}
         enrolledCoursesCount={enrolledCourses.length}
+        courses={landingCourses}
         onOpenAuth={openAuthModal}
         onOpenSettings={openSettingsModal}
         onSignOut={signOut}

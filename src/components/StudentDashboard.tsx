@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BookOpen,
   Lock,
@@ -127,6 +127,23 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
     lessonTitle: string;
   } | null>(null);
   const [updatingProgress, setUpdatingProgress] = useState(false);
+
+  // Dynamically extract categories and levels from actual catalog
+  const dynamicCategories = useMemo(() => {
+    const set = new Set<string>();
+    courses.forEach((c) => {
+      if (c.category) set.add(c.category);
+    });
+    return Array.from(set);
+  }, [courses]);
+
+  const dynamicLevels = useMemo(() => {
+    const set = new Set<string>();
+    courses.forEach((c) => {
+      if (c.level) set.add(c.level);
+    });
+    return Array.from(set);
+  }, [courses]);
 
   // Fetch Dashboard data from backend API
   const fetchDashboardData = useCallback(async () => {
@@ -547,10 +564,11 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                 className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
               >
                 <option value="all">All categories</option>
-                <option value="Product design">Product design</option>
-                <option value="Product strategy">Product strategy</option>
-                <option value="Brand design">Brand design</option>
-                <option value="Web development">Web development</option>
+                {dynamicCategories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
               </select>
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
             </div>
@@ -563,9 +581,11 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                 className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
               >
                 <option value="all">All levels</option>
-                <option value="Beginner">Beginner</option>
-                <option value="Intermediate">Intermediate</option>
-                <option value="Advanced">Advanced</option>
+                {dynamicLevels.map((lvl) => (
+                  <option key={lvl} value={lvl}>
+                    {lvl}
+                  </option>
+                ))}
               </select>
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
             </div>

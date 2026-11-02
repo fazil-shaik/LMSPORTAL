@@ -14,12 +14,12 @@ try {
     const sql = neon(connectionString);
     dbInstance = drizzle(sql, { schema });
     isDatabaseConnected = true;
-    console.log('✅ Neon Database HTTP Client initialized with Drizzle ORM');
+    console.log('Neon Database HTTP Client initialized with Drizzle ORM');
   } else {
-    console.warn('⚠️ Neon DATABASE_URL not set or using placeholder. Running in fallback mode.');
+    console.warn('Neon DATABASE_URL not set or using placeholder. Running in fallback mode.');
   }
 } catch (error) {
-  console.warn('⚠️ Failed to initialize Neon HTTP client. Fallback mode enabled:', error);
+  console.warn('Failed to initialize Neon HTTP client. Fallback mode enabled:', error);
 }
 
 export const db = dbInstance;

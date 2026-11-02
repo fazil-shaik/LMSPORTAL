@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { initialCourses, CourseData, mockEnrollments } from './courses.js';
+import { initialCourses, CourseData, mockEnrollments, mockPurchases, MockPurchase, getUserCourseProgress } from './courses.js';
+import { mockUsers } from './auth.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
 import { eq, desc } from 'drizzle-orm';
@@ -48,61 +49,8 @@ router.get('/verify', authenticate, verifyAdminAccess, (req: Request, res: Respo
 // ============================================================================
 // Fallback in-memory stores for Purchases, Refunds, Feedback, and Notifications
 // ============================================================================
-export interface MockPurchase {
-  id: string;
-  userId: string;
-  studentName: string;
-  studentEmail: string;
-  courseId: string;
-  courseTitle: string;
-  amountCents: number;
-  currency: string;
-  provider: 'stripe' | 'paypal';
-  status: 'paid' | 'refunded' | 'pending';
-  createdAt: string;
-}
-
-export const mockPurchases: MockPurchase[] = [
-  {
-    id: 'pur-101',
-    userId: 'default-student-seed',
-    studentName: 'Alex Rivers',
-    studentEmail: 'student@internwala.com',
-    courseId: 'c1111111-1111-1111-1111-111111111111',
-    courseTitle: 'Product Design, from insight to impact',
-    amountCents: 20000,
-    currency: 'USD',
-    provider: 'stripe',
-    status: 'paid',
-    createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'pur-102',
-    userId: 'usr-2',
-    studentName: 'Priya Sharma',
-    studentEmail: 'priya.s@example.com',
-    courseId: 'c2222222-2222-2222-2222-222222222222',
-    courseTitle: 'Systems thinking for product teams',
-    amountCents: 20000,
-    currency: 'stripe',
-    provider: 'stripe',
-    status: 'paid',
-    createdAt: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'pur-103',
-    userId: 'usr-3',
-    studentName: 'Liam Chen',
-    studentEmail: 'liam.chen@tech.org',
-    courseId: 'c1111111-1111-1111-1111-111111111111',
-    courseTitle: 'Product Design, from insight to impact',
-    amountCents: 20000,
-    currency: 'USD',
-    provider: 'paypal',
-    status: 'refunded',
-    createdAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(),
-  },
-];
+export type { MockPurchase };
+export { mockPurchases };
 
 export interface MockFeedback {
   id: string;
@@ -460,87 +408,55 @@ router.get('/students', authenticate, verifyAdminAccess, async (req: Request, re
   try {
     const searchQuery = (req.query.search as string)?.toLowerCase().trim() || '';
 
-    // Fetch real students from Neon DB or mock fallback
-    let studentList: any[] = [];
+    // Fetch real students dynamically from DB or in-memory store
+    let studentUsers: any[] = [];
+    let allEnrollments: any[] = [];
+
     if (isDatabaseConnected && db) {
       try {
         const dbUsers = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
-        const allEnrollments = await db.select().from(schema.enrollments);
-
-        studentList = dbUsers.map((u: any) => {
-          const userEnrolls = allEnrollments.filter((e: any) => e.userId === u.id);
-          const activeCount = userEnrolls.filter((e: any) => e.status === 'active').length;
-          return {
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            emailVerified: u.emailVerified,
-            role: u.role,
-            createdAt: u.createdAt,
-            enrolledCoursesCount: activeCount,
-            enrolledCourseIds: userEnrolls.map((e: any) => e.courseId),
-            progressPercent: activeCount > 0 ? 42 : 0,
-            certificateStatus: activeCount > 0 ? 'valid' : 'none',
-          };
-        });
+        allEnrollments = await db.select().from(schema.enrollments);
+        studentUsers = dbUsers.filter((u: any) => u.role === 'student');
       } catch (err) {
         console.warn('Neon DB students query fallback:', err);
       }
     }
 
-    if (studentList.length === 0) {
-      // Mock student roster matching Figma Frame 3:120568
-      studentList = [
-        {
-          id: 'default-student-seed',
-          name: 'Alex Rivers',
-          email: 'student@internwala.com',
-          emailVerified: true,
-          role: 'student',
-          createdAt: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(),
-          enrolledCoursesCount: 2,
-          enrolledCourseIds: ['c1111111-1111-1111-1111-111111111111', 'c2222222-2222-2222-2222-222222222222'],
-          progressPercent: 68,
-          certificateStatus: 'valid',
-        },
-        {
-          id: 'usr-2',
-          name: 'Priya Sharma',
-          email: 'priya.s@example.com',
-          emailVerified: true,
-          role: 'student',
-          createdAt: new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString(),
-          enrolledCoursesCount: 1,
-          enrolledCourseIds: ['c1111111-1111-1111-1111-111111111111'],
-          progressPercent: 100,
-          certificateStatus: 'valid',
-        },
-        {
-          id: 'usr-3',
-          name: 'Liam Chen',
-          email: 'liam.chen@tech.org',
-          emailVerified: true,
-          role: 'student',
-          createdAt: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
-          enrolledCoursesCount: 1,
-          enrolledCourseIds: ['c2222222-2222-2222-2222-222222222222'],
-          progressPercent: 25,
-          certificateStatus: 'none',
-        },
-        {
-          id: 'usr-4',
-          name: 'Sarah Jenkins',
-          email: 'sarah.j@gmail.com',
-          emailVerified: false,
-          role: 'student',
-          createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
-          enrolledCoursesCount: 0,
-          enrolledCourseIds: [],
-          progressPercent: 0,
-          certificateStatus: 'none',
-        },
-      ];
+    if (studentUsers.length === 0) {
+      studentUsers = mockUsers.filter((u) => u.role === 'student');
+      allEnrollments = mockEnrollments;
     }
+
+    let studentList = studentUsers.map((u: any) => {
+      const userEnrolls = allEnrollments.filter((e: any) => e.userId === u.id && e.status === 'active');
+      const activeCount = userEnrolls.length;
+      const enrolledCourses = initialCourses.filter((c) => userEnrolls.some((e: any) => e.courseId === c.id));
+
+      let totalProg = 0;
+      let completedCount = 0;
+      for (const c of enrolledCourses) {
+        const prog = getUserCourseProgress(u.id, c, true);
+        totalProg += prog.percent;
+        if (prog.isCompleted || prog.percent >= 100) {
+          completedCount += 1;
+        }
+      }
+
+      const avgProgress = activeCount > 0 ? Math.round(totalProg / activeCount) : 0;
+
+      return {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        emailVerified: u.emailVerified,
+        role: u.role,
+        createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : new Date().toISOString(),
+        enrolledCoursesCount: activeCount,
+        enrolledCourseIds: userEnrolls.map((e: any) => e.courseId),
+        progressPercent: avgProgress,
+        certificateStatus: completedCount > 0 ? 'valid' : 'none',
+      };
+    });
 
     if (searchQuery) {
       studentList = studentList.filter(
@@ -715,20 +631,37 @@ router.get('/feedback', authenticate, verifyAdminAccess, async (_req: Request, r
 // Funnel from visit to signup to purchase to completion
 // ============================================================================
 router.get('/analytics', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
-  return res.status(200).json({
-    success: true,
-    funnel: [
-      { step: 'Landing Visits', count: 14250, conversionRate: 100 },
-      { step: 'Signups', count: 3200, conversionRate: 22.4 },
-      { step: 'Course Checkout & Purchases', count: 680, conversionRate: 21.25 },
-      { step: '100% Course Completions', count: 285, conversionRate: 41.9 },
-    ],
-    summary: {
-      completionRate: 41.9, // PRD Target: above 40 percent
-      refundRate: 1.8, // PRD Target: below 5 percent
-      avgTimeToFirstLessonMinutes: 14,
-    },
-  });
+  try {
+    const studentCount = mockUsers.filter((u) => u.role === 'student').length;
+    const paidPurchases = mockPurchases.filter((p) => p.status === 'paid').length;
+    const refundedPurchases = mockPurchases.filter((p) => p.status === 'refunded').length;
+    const activeEnrollments = mockEnrollments.filter((e) => e.status === 'active').length;
+
+    const estimatedVisits = Math.max(50, studentCount * 6 + 30);
+    const signupRate = estimatedVisits > 0 ? Math.round((studentCount / estimatedVisits) * 1000) / 10 : 0;
+    const purchaseRate = studentCount > 0 ? Math.round((paidPurchases / studentCount) * 1000) / 10 : 0;
+    const completionRate = activeEnrollments > 0 ? 50 : 0;
+    const refundRate = (paidPurchases + refundedPurchases) > 0 
+      ? Math.round((refundedPurchases / (paidPurchases + refundedPurchases)) * 1000) / 10 
+      : 0;
+
+    return res.status(200).json({
+      success: true,
+      funnel: [
+        { step: 'Landing Visits', count: estimatedVisits, conversionRate: 100 },
+        { step: 'Signups', count: studentCount, conversionRate: signupRate },
+        { step: 'Course Checkout & Purchases', count: paidPurchases, conversionRate: purchaseRate },
+        { step: 'Active Course Enrollments', count: activeEnrollments, conversionRate: activeEnrollments > 0 ? 100 : 0 },
+      ],
+      summary: {
+        completionRate,
+        refundRate,
+        avgTimeToFirstLessonMinutes: 12,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch analytics.' });
+  }
 });
 
 // ============================================================================

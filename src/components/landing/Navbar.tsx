@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Menu,
   X,
@@ -21,6 +21,7 @@ interface NavbarProps {
   navigate: (path: string) => void;
   user: any;
   enrolledCoursesCount: number;
+  courses?: any[];
   onOpenAuth: (mode: 'signin' | 'signup' | 'verify') => void;
   onOpenSettings: (tab?: 'profile' | 'security' | 'billing' | 'privacy') => void;
   onSignOut: () => void;
@@ -33,6 +34,7 @@ export default function Navbar({
   navigate,
   user,
   enrolledCoursesCount,
+  courses = [],
   onOpenAuth,
   onOpenSettings,
   onSignOut,
@@ -40,6 +42,26 @@ export default function Navbar({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  const dynamicCategories = useMemo(() => {
+    if (!courses || courses.length === 0) {
+      return [{ name: 'All Courses', count: 'Explore' }];
+    }
+    const map: Record<string, number> = {};
+    for (const c of courses) {
+      if (c.category) {
+        map[c.category] = (map[c.category] || 0) + 1;
+      }
+    }
+    const entries = Object.entries(map);
+    if (entries.length === 0) {
+      return [{ name: 'All Courses', count: `${courses.length} courses` }];
+    }
+    return entries.map(([name, count]) => ({
+      name,
+      count: `${count} ${count === 1 ? 'course' : 'courses'}`,
+    }));
+  }, [courses]);
 
   const isDashboard = currentPath.startsWith('/dashboard');
   const isAdmin = currentPath.startsWith('/admin');
@@ -86,13 +108,7 @@ export default function Navbar({
 
             {categoriesOpen && (
               <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-xl shadow-xl p-2 z-50 animate-fadeIn">
-                {[
-                  { name: 'Product Design & UX', count: '12 courses' },
-                  { name: 'Full-Stack Web Dev', count: '18 courses' },
-                  { name: 'Systems Architecture', count: '8 courses' },
-                  { name: 'Product Management', count: '10 courses' },
-                  { name: 'Brand & Visual Design', count: '14 courses' },
-                ].map((cat, idx) => (
+                {dynamicCategories.map((cat, idx) => (
                   <button
                     key={idx}
                     onClick={() => {
@@ -100,10 +116,10 @@ export default function Navbar({
                       const el = document.getElementById('courses');
                       if (el) el.scrollIntoView({ behavior: 'smooth' });
                     }}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-[#0f172a] dark:text-slate-200 flex items-center justify-between"
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium text-[#0f172a] dark:text-slate-200 flex items-center justify-between cursor-pointer"
                   >
                     <span>{cat.name}</span>
-                    <span className="text-[10px] text-slate-400">{cat.count}</span>
+                    <span className="text-[10px] text-slate-400 font-semibold">{cat.count}</span>
                   </button>
                 ))}
               </div>

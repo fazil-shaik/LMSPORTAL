@@ -193,26 +193,33 @@ export const initialCourses: CourseData[] = [
   },
 ];
 
-// Fallback in-memory enrollments and progress storage
+// Fallback in-memory enrollments and purchases storage
 export const mockEnrollments: Array<{
   id: string;
   userId: string;
   courseId: string;
   status: 'active' | 'revoked';
   enrolledDate: Date;
-}> = [
-  // Default sample enrollment for Product Design course (c1111111) to match Figma desktop dashboard
-  {
-    id: 'enr-sample-default',
-    userId: 'default-student-seed',
-    courseId: 'c1111111-1111-1111-1111-111111111111',
-    status: 'active',
-    enrolledDate: new Date('2026-06-01T10:00:00Z'),
-  },
-];
+}> = [];
+
+export interface MockPurchase {
+  id: string;
+  userId: string;
+  studentName: string;
+  studentEmail: string;
+  courseId: string;
+  courseTitle: string;
+  amountCents: number;
+  currency: string;
+  provider: 'stripe' | 'paypal';
+  status: 'paid' | 'refunded' | 'pending';
+  createdAt: string;
+}
+
+export const mockPurchases: MockPurchase[] = [];
 
 // In-memory course progress map: key: `${userId}:${courseId}`
-interface ProgressState {
+export interface ProgressState {
   completedLessons: number;
   totalLessons: number;
   percent: number;
@@ -223,42 +230,27 @@ interface ProgressState {
   updatedAt: Date;
 }
 
-const mockProgressMap = new Map<string, ProgressState>();
+export const mockProgressMap = new Map<string, ProgressState>();
 
-// Helper to get or initialize progress for user + course
-function getUserCourseProgress(userId: string, course: CourseData, isEnrolled: boolean): ProgressState {
+// Helper to get or initialize progress dynamically for user + course
+export function getUserCourseProgress(userId: string, course: CourseData, isEnrolled: boolean): ProgressState {
   const key = `${userId}:${course.id}`;
   if (mockProgressMap.has(key)) {
     return mockProgressMap.get(key)!;
   }
 
-  // If user is enrolled, provide realistic initial state matching Figma design
-  // In Figma: Course 1 has 5 of 12 lessons completed (42%), Lesson 6 is next
-  if (isEnrolled && course.id === 'c1111111-1111-1111-1111-111111111111') {
-    const defaultState: ProgressState = {
-      completedLessons: 5,
-      totalLessons: 12,
-      percent: 42,
-      isCompleted: false,
-      lastOpenedLessonNumber: 6,
-      lastOpenedLessonTitle: 'Turning insights into opportunities',
-      totalTimeMinutes: 150, // 2h 30m
-      updatedAt: new Date(),
-    };
-    mockProgressMap.set(key, defaultState);
-    return defaultState;
-  }
-
+  const totalLessons = course.lessons?.length || course.lessonCount || 1;
   const defaultState: ProgressState = {
     completedLessons: 0,
-    totalLessons: course.lessonCount,
+    totalLessons,
     percent: 0,
     isCompleted: false,
     lastOpenedLessonNumber: 1,
-    lastOpenedLessonTitle: course.lessons[0]?.title || 'Introduction',
+    lastOpenedLessonTitle: course.lessons && course.lessons[0] ? course.lessons[0].title : 'Introduction',
     totalTimeMinutes: 0,
     updatedAt: new Date(),
   };
+
   if (isEnrolled) {
     mockProgressMap.set(key, defaultState);
   }
@@ -305,17 +297,19 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
       } catch (dbErr: any) {
         console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
         enrolledCourseIds = mockEnrollments
-          .filter((e) => (e.userId === userId || e.userId === 'default-student-seed') && e.status === 'active')
+          .filter((e) => e.userId === userId && e.status === 'active')
           .map((e) => e.courseId);
       }
     } else {
       enrolledCourseIds = mockEnrollments
-        .filter((e) => (e.userId === userId || e.userId === 'default-student-seed') && e.status === 'active')
+        .filter((e) => e.userId === userId && e.status === 'active')
         .map((e) => e.courseId);
     }
 
-    // 2. Map all courses with enrollment & progress status (FR-14 & FR-15)
-    let processedCourses = initialCourses.map((c) => {
+    // 2. Map only published courses (or courses student already has active enrollment in)
+    const availableCourses = initialCourses.filter((c) => c.status !== 'draft' || enrolledCourseIds.includes(c.id));
+
+    let processedCourses = availableCourses.map((c) => {
       const isEnrolled = enrolledCourseIds.includes(c.id);
       const progress = getUserCourseProgress(userId, c, isEnrolled);
 
@@ -333,7 +327,7 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
       };
     });
 
-    // 3. Compute Stats
+    // 3. Compute Stats strictly based on actual enrollments
     const enrolledCoursesList = processedCourses.filter((c) => c.isEnrolled);
     const completedCoursesList = enrolledCoursesList.filter((c) => c.progress.isCompleted || c.progress.percent >= 100);
     const totalCompletedLessons = enrolledCoursesList.reduce((acc, cur) => acc + cur.progress.completedLessons, 0);
@@ -349,7 +343,7 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
     const stats = {
       enrolledCount: enrolledCoursesList.length,
       completedLessonsCount: totalCompletedLessons,
-      learningTimeFormatted: learningTimeFormatted || '2h 30m',
+      learningTimeFormatted: learningTimeFormatted,
       certificatesCount: completedCoursesList.length,
     };
 
@@ -531,12 +525,12 @@ router.get('/my-enrollments', authenticate, async (req: Request, res: Response) 
       } catch (dbErr: any) {
         console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
         enrolledCourseIds = mockEnrollments
-          .filter((e) => (e.userId === userId || e.userId === 'default-student-seed') && e.status === 'active')
+          .filter((e) => e.userId === userId && e.status === 'active')
           .map((e) => e.courseId);
       }
     } else {
       enrolledCourseIds = mockEnrollments
-        .filter((e) => (e.userId === userId || e.userId === 'default-student-seed') && e.status === 'active')
+        .filter((e) => e.userId === userId && e.status === 'active')
         .map((e) => e.courseId);
     }
 
@@ -605,6 +599,24 @@ router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => 
     const course = initialCourses.find((c) => c.id === courseId);
     if (course) {
       getUserCourseProgress(userId, course, true);
+
+      // Record purchase dynamically for Admin Studio sales & analytics
+      const alreadyHasPurchase = mockPurchases.some((p) => p.userId === userId && p.courseId === courseId && p.status === 'paid');
+      if (!alreadyHasPurchase) {
+        mockPurchases.unshift({
+          id: 'pur-' + Date.now().toString(36),
+          userId,
+          studentName: req.user!.name,
+          studentEmail: req.user!.email,
+          courseId: course.id,
+          courseTitle: course.title,
+          amountCents: course.priceCents,
+          currency: course.currency || 'USD',
+          provider: 'stripe',
+          status: 'paid',
+          createdAt: new Date().toISOString(),
+        });
+      }
     }
 
     return res.status(200).json({
