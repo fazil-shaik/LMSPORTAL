@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
 import { authenticate, clearAuthCookie, comparePassword } from '../middleware/auth.js';
-import { mockUsers } from './auth.js';
+import { mockUsers, safeFindUserById } from './auth.js';
 
 const router = Router();
 
@@ -23,14 +23,7 @@ const deleteAccountSchema = z.object({
 router.get('/profile', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    let userRecord: any = null;
-
-    if (isDatabaseConnected && db) {
-      const results = await db.select().from(schema.users).where(eq(schema.users.id, userId));
-      userRecord = results[0];
-    } else {
-      userRecord = mockUsers.find((u) => u.id === userId);
-    }
+    const userRecord = await safeFindUserById(userId);
 
     if (!userRecord) {
       return res.status(404).json({ success: false, message: 'User profile not found.' });

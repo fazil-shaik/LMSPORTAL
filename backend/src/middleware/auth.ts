@@ -12,6 +12,7 @@ export interface AuthUserPayload {
   name: string;
   role: 'student' | 'admin';
   emailVerified: boolean;
+  avatarUrl?: string | null;
 }
 
 declare global {

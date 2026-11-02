@@ -1,10 +1,9 @@
-import { neon, neonConfig, Pool } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
+import { neon } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
 import * as schema from './schema.js';
 import dotenv from 'dotenv';
 dotenv.config();
 
-// Ensure WebSocket is configured for Neon in Node environments if needed
 const connectionString = process.env.DATABASE_URL || '';
 
 let dbInstance: any = null;
@@ -12,15 +11,15 @@ export let isDatabaseConnected = false;
 
 try {
   if (connectionString && !connectionString.includes('placeholder')) {
-    const pool = new Pool({ connectionString });
-    dbInstance = drizzle(pool, { schema });
+    const sql = neon(connectionString);
+    dbInstance = drizzle(sql, { schema });
     isDatabaseConnected = true;
-    console.log('✅ Connected to Neon Database with Drizzle ORM');
+    console.log('✅ Neon Database HTTP Client initialized with Drizzle ORM');
   } else {
-    console.warn('⚠️ Neon DATABASE_URL is not configured or using placeholder. Running in memory-safe fallback mode.');
+    console.warn('⚠️ Neon DATABASE_URL not set or using placeholder. Running in fallback mode.');
   }
 } catch (error) {
-  console.warn('⚠️ Failed to connect to Neon database directly. Fallback mode enabled:', error);
+  console.warn('⚠️ Failed to initialize Neon HTTP client. Fallback mode enabled:', error);
 }
 
 export const db = dbInstance;

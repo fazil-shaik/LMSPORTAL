@@ -152,6 +152,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         closeAuthModal();
         fetchEnrollments();
+        // Route to /dashboard on successful login
+        if (window.location.pathname !== '/dashboard') {
+          window.history.pushState({}, '', '/dashboard');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
         return { success: true, message: data.message };
       } else {
         return { success: false, message: data.message || 'Invalid credentials' };
@@ -212,6 +217,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         closeAuthModal();
         fetchEnrollments();
+        // Route to /dashboard on successful login
+        if (window.location.pathname !== '/dashboard') {
+          window.history.pushState({}, '', '/dashboard');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }
         return { success: true, message: data.message };
       } else {
         return { success: false, message: data.message || 'Google sign in failed' };
@@ -418,6 +428,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setEnrolledCourses([]);
       closeSettingsModal();
+      if (window.location.pathname === '/dashboard') {
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
     }
   };
 

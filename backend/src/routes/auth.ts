@@ -55,6 +55,32 @@ export const mockUsers: MockUser[] = [
   },
 ];
 
+// Robust Database Helpers with automatic fallback
+export async function safeFindUserByEmail(email: string): Promise<any> {
+  const lower = email.toLowerCase().trim();
+  if (isDatabaseConnected && db) {
+    try {
+      const results = await db.select().from(schema.users).where(eq(schema.users.email, lower));
+      if (results && results.length > 0) return results[0];
+    } catch (err: any) {
+      console.warn('Neon query error, fallback to memory store:', err?.message || err);
+    }
+  }
+  return mockUsers.find((u) => u.email.toLowerCase() === lower) || null;
+}
+
+export async function safeFindUserById(id: string): Promise<any> {
+  if (isDatabaseConnected && db) {
+    try {
+      const results = await db.select().from(schema.users).where(eq(schema.users.id, id));
+      if (results && results.length > 0) return results[0];
+    } catch (err: any) {
+      console.warn('Neon query error, fallback to memory store:', err?.message || err);
+    }
+  }
+  return mockUsers.find((u) => u.id === id) || null;
+}
+
 // Zod Validation Schemas
 const signUpSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
@@ -119,13 +145,7 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
     const lowerEmail = email.toLowerCase().trim();
 
     // Check if user already exists
-    let existingUser: any = null;
-    if (isDatabaseConnected && db) {
-      const results = await db.select().from(schema.users).where(eq(schema.users.email, lowerEmail));
-      existingUser = results[0];
-    } else {
-      existingUser = mockUsers.find((u) => u.email.toLowerCase() === lowerEmail);
-    }
+    const existingUser = await safeFindUserByEmail(lowerEmail);
 
     if (existingUser) {
       return res.status(409).json({
@@ -138,29 +158,38 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
     const passwordHash = await hashPassword(password);
     const verificationToken = 'vtok_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
 
-    let newUser: AuthUserPayload;
+    let newUser: AuthUserPayload | null = null;
 
     if (isDatabaseConnected && db) {
-      const inserted = await db
-        .insert(schema.users)
-        .values({
-          name,
-          email: lowerEmail,
-          passwordHash,
-          emailVerified: false,
-          verificationToken,
-          role: 'student',
-        })
-        .returning();
+      try {
+        const inserted = await db
+          .insert(schema.users)
+          .values({
+            name,
+            email: lowerEmail,
+            passwordHash,
+            emailVerified: false,
+            verificationToken,
+            role: 'student',
+          })
+          .returning();
 
-      newUser = {
-        id: inserted[0].id,
-        name: inserted[0].name,
-        email: inserted[0].email,
-        role: inserted[0].role,
-        emailVerified: inserted[0].emailVerified,
-      };
-    } else {
+        if (inserted && inserted[0]) {
+          newUser = {
+            id: inserted[0].id,
+            name: inserted[0].name,
+            email: inserted[0].email,
+            role: inserted[0].role,
+            emailVerified: inserted[0].emailVerified,
+            avatarUrl: inserted[0].avatarUrl,
+          };
+        }
+      } catch (dbErr: any) {
+        console.warn('Neon insert user failed, saving to mock repository:', dbErr?.message || dbErr);
+      }
+    }
+
+    if (!newUser) {
       const id = 'user-' + Date.now().toString(36);
       const mockRecord: MockUser = {
         id,
@@ -221,13 +250,7 @@ router.post('/signin', rateLimiter(15 * 60 * 1000, 15), async (req: Request, res
     const { email, password, rememberMe } = validatedData.data;
     const lowerEmail = email.toLowerCase().trim();
 
-    let userRecord: any = null;
-    if (isDatabaseConnected && db) {
-      const results = await db.select().from(schema.users).where(eq(schema.users.email, lowerEmail));
-      userRecord = results[0];
-    } else {
-      userRecord = mockUsers.find((u) => u.email.toLowerCase() === lowerEmail);
-    }
+    const userRecord = await safeFindUserByEmail(lowerEmail);
 
     if (!userRecord) {
       return res.status(401).json({
@@ -297,13 +320,7 @@ router.post('/google', rateLimiter(15 * 60 * 1000, 20), async (req: Request, res
     const { email, name, avatarUrl } = validatedData.data;
     const lowerEmail = email.toLowerCase().trim();
 
-    let userRecord: any = null;
-    if (isDatabaseConnected && db) {
-      const results = await db.select().from(schema.users).where(eq(schema.users.email, lowerEmail));
-      userRecord = results[0];
-    } else {
-      userRecord = mockUsers.find((u) => u.email.toLowerCase() === lowerEmail);
-    }
+    let userRecord = await safeFindUserByEmail(lowerEmail);
 
     if (!userRecord) {
       // Create new user account with Google profile (pre-verified by Google)
@@ -311,19 +328,24 @@ router.post('/google', rateLimiter(15 * 60 * 1000, 20), async (req: Request, res
       const passwordHash = await hashPassword(randomPassword);
 
       if (isDatabaseConnected && db) {
-        const inserted = await db
-          .insert(schema.users)
-          .values({
-            name,
-            email: lowerEmail,
-            passwordHash,
-            emailVerified: true, // Google accounts are email-verified
-            avatarUrl: avatarUrl || null,
-            role: 'student',
-          })
-          .returning();
-        userRecord = inserted[0];
-      } else {
+        try {
+          const inserted = await db
+            .insert(schema.users)
+            .values({
+              name,
+              email: lowerEmail,
+              passwordHash,
+              emailVerified: true, // Google accounts are email-verified
+              avatarUrl: avatarUrl || null,
+              role: 'student',
+            })
+            .returning();
+          userRecord = inserted[0];
+        } catch (dbErr: any) {
+          console.warn('Neon google insert error, fallback to memory:', dbErr?.message || dbErr);
+        }
+      }
+      if (!userRecord) {
         const id = 'user-google-' + Date.now().toString(36);
         userRecord = {
           id,
@@ -341,10 +363,13 @@ router.post('/google', rateLimiter(15 * 60 * 1000, 20), async (req: Request, res
     } else {
       // Update avatar if provided
       if (avatarUrl && !userRecord.avatarUrl) {
+        userRecord.avatarUrl = avatarUrl;
         if (isDatabaseConnected && db) {
-          await db.update(schema.users).set({ avatarUrl }).where(eq(schema.users.id, userRecord.id));
-        } else {
-          userRecord.avatarUrl = avatarUrl;
+          try {
+            await db.update(schema.users).set({ avatarUrl }).where(eq(schema.users.id, userRecord.id));
+          } catch (e) {
+            // ignore
+          }
         }
       }
     }
@@ -395,14 +420,7 @@ router.post('/signout', (req: Request, res: Response) => {
 router.get('/me', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    let userRecord: any = null;
-
-    if (isDatabaseConnected && db) {
-      const results = await db.select().from(schema.users).where(eq(schema.users.id, userId));
-      userRecord = results[0];
-    } else {
-      userRecord = mockUsers.find((u) => u.id === userId);
-    }
+    const userRecord = await safeFindUserById(userId);
 
     if (!userRecord) {
       return res.status(404).json({
