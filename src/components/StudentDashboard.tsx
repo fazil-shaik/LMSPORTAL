@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ExternalLink,
   GraduationCap,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -253,15 +254,31 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
               </p>
             </div>
 
-            {onBackToExplore && (
-              <button
-                onClick={onBackToExplore}
-                className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-900 transition shadow-xs"
-              >
-                <span>Browse all public courses</span>
-                <ExternalLink className="size-3.5" />
-              </button>
-            )}
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              {user && user.role === 'admin' && (
+                <button
+                  onClick={() => {
+                    window.history.pushState({}, '', '/admin');
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer"
+                  title="Open InternWala Admin Studio"
+                >
+                  <ShieldCheck className="size-3.5" />
+                  <span>Admin Studio</span>
+                </button>
+              )}
+
+              {onBackToExplore && (
+                <button
+                  onClick={onBackToExplore}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-900 transition shadow-xs cursor-pointer"
+                >
+                  <span>Browse all public courses</span>
+                  <ExternalLink className="size-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

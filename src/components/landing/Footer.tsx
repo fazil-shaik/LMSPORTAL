@@ -1,4 +1,4 @@
-import { Globe } from 'lucide-react';
+import { Globe, Lock } from 'lucide-react';
 
 export default function Footer() {
   return (
@@ -110,9 +110,22 @@ export default function Footer() {
             <p className="text-[#64748b] dark:text-slate-500 text-[12px] leading-[1.5]">
               © 2026 InternWala. Keep growing. · Privacy policy · Terms of service
             </p>
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <Globe className="size-3.5" />
-              <span>English (US)</span>
+            <div className="flex items-center gap-4 text-xs text-slate-500">
+              <button
+                onClick={() => {
+                  window.history.pushState({}, '', '/admin');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }}
+                className="hover:text-rose-500 dark:hover:text-rose-400 transition-colors flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 dark:text-slate-600 cursor-pointer"
+                title="Restricted Administrator Studio"
+              >
+                <Lock className="size-3" />
+                <span>Admin Studio</span>
+              </button>
+              <div className="flex items-center gap-2">
+                <Globe className="size-3.5" />
+                <span>English (US)</span>
+              </div>
             </div>
           </div>
         </div>

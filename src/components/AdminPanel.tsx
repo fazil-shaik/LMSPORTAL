@@ -129,6 +129,19 @@ interface NotificationItem {
   timestamp: string;
 }
 
+// Central helper ensuring session cookies are sent on all admin requests
+const adminFetch = (url: string, init?: RequestInit) => {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return fetch(url, {
+    ...init,
+    credentials: 'include',
+    headers,
+  });
+};
+
 interface AdminPanelProps {
   onBackToApp: () => void;
   onCourseModified?: () => void;
@@ -197,7 +210,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchCourses = async () => {
     setLoadingCourses(true);
     try {
-      const res = await fetch('/api/admin/courses');
+      const res = await adminFetch('/api/admin/courses');
       const data = await res.json();
       if (data.success && data.courses) {
         setCourses(data.courses);
@@ -217,7 +230,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     setLoadingStudents(true);
     try {
       const url = studentSearch ? `/api/admin/students?search=${encodeURIComponent(studentSearch)}` : '/api/admin/students';
-      const res = await fetch(url);
+      const res = await adminFetch(url);
       const data = await res.json();
       if (data.success && data.students) {
         setStudents(data.students);
@@ -233,7 +246,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchSales = async () => {
     setLoadingSales(true);
     try {
-      const res = await fetch('/api/admin/sales');
+      const res = await adminFetch('/api/admin/sales');
       const data = await res.json();
       if (data.success) {
         setSalesMetrics(data.metrics);
@@ -250,8 +263,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchAnalyticsAndFeedback = async () => {
     try {
       const [resAnal, resFeed] = await Promise.all([
-        fetch('/api/admin/analytics'),
-        fetch('/api/admin/feedback'),
+        adminFetch('/api/admin/analytics'),
+        adminFetch('/api/admin/feedback'),
       ]);
       const dataAnal = await resAnal.json();
       const dataFeed = await resFeed.json();
@@ -271,7 +284,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchNotifications = async () => {
     setLoadingNotifs(true);
     try {
-      const res = await fetch('/api/admin/notifications');
+      const res = await adminFetch('/api/admin/notifications');
       const data = await res.json();
       if (data.success && data.notifications) {
         setNotifications(data.notifications);
@@ -297,9 +310,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
       const isVideo = file.type.startsWith('video');
 
       try {
-        const res = await fetch('/api/admin/upload', {
+        const res = await adminFetch('/api/admin/upload', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             fileData: base64Data,
             resourceType: isVideo ? 'video' : 'image',
@@ -345,9 +357,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
       const method = isCreatingCourse ? 'POST' : 'PUT';
       const url = isCreatingCourse ? '/api/admin/courses' : `/api/admin/courses/${selectedCourse.id}`;
 
-      const res = await fetch(url, {
+      const res = await adminFetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(selectedCourse),
       });
 
@@ -374,9 +385,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     setSelectedCourse(updated);
 
     try {
-      await fetch(`/api/admin/courses/${selectedCourse.id}`, {
+      await adminFetch(`/api/admin/courses/${selectedCourse.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
       });
       fetchCourses();
@@ -390,7 +400,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const handleDeleteCourse = async (id: string) => {
     if (!window.confirm('Are you sure you want to delete this course from InternWala?')) return;
     try {
-      const res = await fetch(`/api/admin/courses/${id}`, { method: 'DELETE' });
+      const res = await adminFetch(`/api/admin/courses/${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
         fetchCourses();
@@ -409,9 +419,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     if (!selectedCourse || !newLessonTitle) return;
 
     try {
-      const res = await fetch(`/api/admin/courses/${selectedCourse.id}/lessons`, {
+      const res = await adminFetch(`/api/admin/courses/${selectedCourse.id}/lessons`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: newLessonTitle,
           duration: newLessonDuration || '25 min',
@@ -444,7 +453,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const handleDeleteLesson = async (lessonId: string) => {
     if (!selectedCourse) return;
     try {
-      const res = await fetch(`/api/admin/courses/${selectedCourse.id}/lessons/${lessonId}`, {
+      const res = await adminFetch(`/api/admin/courses/${selectedCourse.id}/lessons/${lessonId}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -464,9 +473,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     if (!grantModalStudent || !grantCourseId) return;
 
     try {
-      const res = await fetch(`/api/admin/students/${grantModalStudent.id}/grant-access`, {
+      const res = await adminFetch(`/api/admin/students/${grantModalStudent.id}/grant-access`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ courseId: grantCourseId }),
       });
       const data = await res.json();
@@ -485,9 +493,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const handleRevokeAccess = async (studentId: string, courseId: string) => {
     if (!window.confirm('Are you sure you want to revoke this student course access?')) return;
     try {
-      const res = await fetch(`/api/admin/students/${studentId}/revoke-access`, {
+      const res = await adminFetch(`/api/admin/students/${studentId}/revoke-access`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ courseId }),
       });
       const data = await res.json();
@@ -505,7 +512,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const handleProcessRefund = async (purchaseId: string) => {
     if (!window.confirm('Process refund for this purchase? Student access will automatically be revoked.')) return;
     try {
-      const res = await fetch(`/api/admin/sales/${purchaseId}/refund`, {
+      const res = await adminFetch(`/api/admin/sales/${purchaseId}/refund`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -564,11 +571,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
         <nav className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-900/80 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
           <button
             onClick={() => setActiveTab('courses')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeTab === 'courses'
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'courses'
                 ? 'bg-white dark:bg-slate-800 text-[#4f46e5] dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+              }`}
           >
             <BookOpen className="size-3.5" />
             <span>Course Editor (FR-51-53)</span>
@@ -576,11 +582,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
 
           <button
             onClick={() => setActiveTab('students')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeTab === 'students'
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'students'
                 ? 'bg-white dark:bg-slate-800 text-[#4f46e5] dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+              }`}
           >
             <Users className="size-3.5" />
             <span>Students (FR-54, 56)</span>
@@ -588,11 +593,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
 
           <button
             onClick={() => setActiveTab('sales')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeTab === 'sales'
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'sales'
                 ? 'bg-white dark:bg-slate-800 text-[#4f46e5] dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+              }`}
           >
             <DollarSign className="size-3.5" />
             <span>Sales & Refunds (FR-55)</span>
@@ -600,11 +604,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
 
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeTab === 'analytics'
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'analytics'
                 ? 'bg-white dark:bg-slate-800 text-[#4f46e5] dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+              }`}
           >
             <BarChart3 className="size-3.5" />
             <span>Funnel & Reviews (FR-57, 58)</span>
@@ -612,11 +615,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
 
           <button
             onClick={() => setActiveTab('notifications')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-              activeTab === 'notifications'
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${activeTab === 'notifications'
                 ? 'bg-white dark:bg-slate-800 text-[#4f46e5] dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+              }`}
           >
             <Mail className="size-3.5" />
             <span>Emails (4.10)</span>
@@ -734,22 +736,20 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                           setSelectedCourse(c);
                           setIsCreatingCourse(false);
                         }}
-                        className={`p-3.5 rounded-xl border transition cursor-pointer text-left flex flex-col gap-2 ${
-                          isSelected
+                        className={`p-3.5 rounded-xl border transition cursor-pointer text-left flex flex-col gap-2 ${isSelected
                             ? 'bg-indigo-50/60 dark:bg-indigo-950/40 border-[#4f46e5] dark:border-indigo-600 shadow-xs'
                             : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900/50'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                             {c.category}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              c.status === 'draft'
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${c.status === 'draft'
                                 ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300'
                                 : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
-                            }`}
+                              }`}
                           >
                             {c.status === 'draft' ? 'Draft' : 'Published'}
                           </span>
@@ -794,11 +794,10 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                         {/* Status Toggle Button (FR-51) */}
                         <button
                           onClick={handleTogglePublish}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition border ${
-                            selectedCourse.status === 'published'
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition border ${selectedCourse.status === 'published'
                               ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
                               : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
-                          }`}
+                            }`}
                         >
                           {selectedCourse.status === 'published' ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
                           <span>{selectedCourse.status === 'published' ? 'Published' : 'Draft'}</span>
@@ -1400,62 +1399,61 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider font-extrabold">
-                      <th className="py-3 px-4">Transaction ID</th>
-                      <th className="py-3 px-4">Student</th>
-                      <th className="py-3 px-4">Course</th>
-                      <th className="py-3 px-4">Amount</th>
-                      <th className="py-3 px-4">Provider</th>
-                      <th className="py-3 px-4">Status</th>
-                      <th className="py-3 px-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                    {purchases.map((purchase) => (
-                      <tr key={purchase.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition">
-                        <td className="py-3.5 px-4 font-mono font-medium text-slate-500">{purchase.id}</td>
-                        <td className="py-3.5 px-4">
-                          <p className="font-bold text-[#0f172a] dark:text-white">{purchase.studentName}</p>
-                          <p className="text-[11px] text-slate-400">{purchase.studentEmail}</p>
-                        </td>
-                        <td className="py-3.5 px-4 font-medium text-slate-700 dark:text-slate-300">
-                          {purchase.courseTitle}
-                        </td>
-                        <td className="py-3.5 px-4 font-bold text-[#0f172a] dark:text-white">
-                          ${purchase.amountCents / 100} USD
-                        </td>
-                        <td className="py-3.5 px-4 uppercase text-[10px] font-bold text-slate-500">
-                          {purchase.provider}
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              purchase.status === 'paid'
-                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
-                                : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
-                            }`}
-                          >
-                            {purchase.status === 'paid' ? 'Paid (Active)' : 'Refunded'}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          {purchase.status === 'paid' && (
-                            <button
-                              onClick={() => handleProcessRefund(purchase.id)}
-                              className="px-2.5 py-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 border border-rose-200 dark:border-rose-900 rounded-lg transition"
-                              title="Process Refund & Revoke Access (FR-33)"
-                            >
-                              Refund & Revoke
-                            </button>
-                          )}
-                        </td>
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase text-[10px] tracking-wider font-extrabold">
+                        <th className="py-3 px-4">Transaction ID</th>
+                        <th className="py-3 px-4">Student</th>
+                        <th className="py-3 px-4">Course</th>
+                        <th className="py-3 px-4">Amount</th>
+                        <th className="py-3 px-4">Provider</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {purchases.map((purchase) => (
+                        <tr key={purchase.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition">
+                          <td className="py-3.5 px-4 font-mono font-medium text-slate-500">{purchase.id}</td>
+                          <td className="py-3.5 px-4">
+                            <p className="font-bold text-[#0f172a] dark:text-white">{purchase.studentName}</p>
+                            <p className="text-[11px] text-slate-400">{purchase.studentEmail}</p>
+                          </td>
+                          <td className="py-3.5 px-4 font-medium text-slate-700 dark:text-slate-300">
+                            {purchase.courseTitle}
+                          </td>
+                          <td className="py-3.5 px-4 font-bold text-[#0f172a] dark:text-white">
+                            ${purchase.amountCents / 100} USD
+                          </td>
+                          <td className="py-3.5 px-4 uppercase text-[10px] font-bold text-slate-500">
+                            {purchase.provider}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${purchase.status === 'paid'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'
+                                }`}
+                            >
+                              {purchase.status === 'paid' ? 'Paid (Active)' : 'Refunded'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            {purchase.status === 'paid' && (
+                              <button
+                                onClick={() => handleProcessRefund(purchase.id)}
+                                className="px-2.5 py-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/60 border border-rose-200 dark:border-rose-900 rounded-lg transition"
+                                title="Process Refund & Revoke Access (FR-33)"
+                              >
+                                Refund & Revoke
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -26,36 +26,21 @@ export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuard
     setIsSubmitting(true);
 
     try {
-      const res = await fetch('/api/auth/signin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: adminEmail,
-          password: adminPassword,
-          adminSecretKey: adminSecretKey.trim(),
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setLoginError(data.message || 'Administrative credentials verification failed.');
-        setIsSubmitting(false);
-        return;
+      const result = await signIn(adminEmail, adminPassword, false, adminSecretKey.trim() || undefined);
+      if (!result.success) {
+        setLoginError(result.message || 'Administrative credentials verification failed.');
       }
-
-      if (data.user?.role !== 'admin') {
-        setLoginError('Access Denied: This account does not possess administrator privileges.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Re-initialize authentication state via context signIn
-      await signIn(adminEmail, adminPassword, false);
     } catch (err: any) {
       setLoginError(err.message || 'Security verification error. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const fillAdminCredentials = () => {
+    setAdminEmail('admin@internwala.com');
+    setAdminPassword('Password12345');
+    setAdminSecretKey('internwala_admin_2026');
   };
 
   // If the user is authenticated and verified as admin, render Admin Studio directly!
@@ -160,6 +145,17 @@ export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuard
                   className="w-full text-xs font-mono pl-9 pr-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl focus:border-rose-500 focus:outline-none text-white placeholder:text-slate-600"
                 />
               </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Testing credentials?</span>
+              <button
+                type="button"
+                onClick={fillAdminCredentials}
+                className="text-rose-400 hover:text-rose-300 font-bold underline cursor-pointer"
+              >
+                Auto-fill Admin Credentials
+              </button>
             </div>
 
             <button

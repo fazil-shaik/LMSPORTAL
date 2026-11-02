@@ -25,7 +25,7 @@ interface AuthContextType {
   openSettingsModal: (tab?: 'profile' | 'security' | 'billing' | 'privacy') => void;
   closeSettingsModal: () => void;
   setSettingsActiveTab: (tab: 'profile' | 'security' | 'billing' | 'privacy') => void;
-  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<{ success: boolean; message?: string }>;
+  signIn: (email: string, password: string, rememberMe?: boolean, adminSecretKey?: string) => Promise<{ success: boolean; message?: string }>;
   signUp: (name: string, email: string, password: string, terms: boolean) => Promise<{ success: boolean; message?: string; verificationToken?: string }>;
   googleSignIn: (profileData?: { email?: string; name?: string; avatarUrl?: string }) => Promise<{ success: boolean; message?: string }>;
   signOut: () => Promise<void>;
@@ -139,21 +139,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // FR-9: Sign In with email and password
-  const signIn = async (email: string, password: string, rememberMe = false) => {
+  const signIn = async (email: string, password: string, rememberMe = false, adminSecretKey?: string) => {
     try {
       const res = await fetch('/api/auth/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email, password, rememberMe }),
+        body: JSON.stringify({ email, password, rememberMe, adminSecretKey }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
         setUser(data.user);
         closeAuthModal();
         fetchEnrollments();
-        // Route to /dashboard on successful login
-        if (window.location.pathname !== '/dashboard') {
+        // Route to /dashboard on student login, but keep current location if already on /admin
+        if (!window.location.pathname.startsWith('/admin') && window.location.pathname !== '/dashboard') {
           window.history.pushState({}, '', '/dashboard');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }
