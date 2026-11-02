@@ -5,11 +5,12 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import courseRoutes from './routes/courses.js';
+import adminRoutes from './routes/admin.js';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5100;
+const PORT = process.env.PORT || 5120;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 
 // 1. CORS Configuration (Allowing cookies & credentials between Vite & Express)
@@ -22,9 +23,9 @@ app.use(
   })
 );
 
-// 2. Body Parsing & Cookie Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 2. Body Parsing & Cookie Middleware (supporting up to 50mb for media upload)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
 // 3. API Health & Status Endpoint
@@ -41,6 +42,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/courses', courseRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 5. Global 404 Route Handler
 app.use('/api/*', (req: Request, res: Response) => {

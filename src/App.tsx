@@ -14,6 +14,7 @@ import {
   LogOut,
   Settings,
   GraduationCap,
+  ShieldCheck,
 } from 'lucide-react';
 import AOS from 'aos';
 import 'aos/dist/aos.css';
@@ -21,6 +22,7 @@ import { useAuth } from './context/AuthContext';
 import AuthModal from './components/AuthModal';
 import AccountSettingsModal from './components/AccountSettingsModal';
 import StudentDashboard from './components/StudentDashboard';
+import AdminPanel from './components/AdminPanel';
 
 export default function App() {
   // Theme state: light or dark
@@ -102,6 +104,30 @@ export default function App() {
   }, [user]);
 
   const isDashboard = currentPath.startsWith('/dashboard');
+  const isAdmin = currentPath.startsWith('/admin');
+
+  // Dynamic Landing Page Courses State (Eliminating static courses)
+  const [landingCourses, setLandingCourses] = useState<any[]>([]);
+  const [loadingLandingCourses, setLoadingLandingCourses] = useState(false);
+
+  const fetchLandingCourses = async () => {
+    setLoadingLandingCourses(true);
+    try {
+      const res = await fetch('/api/courses/public');
+      const data = await res.json();
+      if (data.success && data.courses) {
+        setLandingCourses(data.courses);
+      }
+    } catch (err) {
+      console.error('Error fetching public courses:', err);
+    } finally {
+      setLoadingLandingCourses(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLandingCourses();
+  }, []);
   const cartCount = enrolledCourses.length;
   const [wishlistActive, setWishlistActive] = useState<Record<string, boolean>>({});
   const [bannerVisible, setBannerVisible] = useState(true);
@@ -420,6 +446,20 @@ export default function App() {
                   <span>{isDashboard ? 'Explore Catalog' : 'My Dashboard'}</span>
                 </button>
 
+                {/* Admin Studio Navigation Button */}
+                <button
+                  onClick={() => navigate(isAdmin ? '/dashboard' : '/admin')}
+                  className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
+                    isAdmin
+                      ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xs border-transparent'
+                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-[#4f46e5] dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border-indigo-200 dark:border-indigo-800'
+                  }`}
+                  title="InternWala Admin Studio (FR-51-58)"
+                >
+                  <ShieldCheck className="size-4" />
+                  <span>{isAdmin ? 'Exit Studio' : 'Admin Studio'}</span>
+                </button>
+
                 {/* Account profile card opening Settings */}
                 <button
                   onClick={() => openSettingsModal('profile')}
@@ -477,6 +517,14 @@ export default function App() {
                   className="bg-[#2d2f31] dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-[#2d2f31] px-4 py-2 rounded-[4px] font-bold text-[13px] shadow-sm transition active:scale-[0.98] inline-flex items-center justify-center cursor-pointer"
                 >
                   Get started
+                </button>
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="hidden md:inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-[#4f46e5] px-2 py-2 cursor-pointer"
+                  title="Admin Studio"
+                >
+                  <ShieldCheck className="size-3.5" />
+                  <span>Admin</span>
                 </button>
               </div>
             )}
@@ -536,6 +584,16 @@ export default function App() {
             >
               <span>My learning (Dashboard)</span>
               {user && <span className="size-2 rounded-full bg-[#4f46e5] animate-pulse" />}
+            </button>
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                navigate('/admin');
+              }}
+              className="text-left font-bold text-slate-700 dark:text-slate-200 py-2 text-base cursor-pointer flex items-center justify-between"
+            >
+              <span>Admin Studio</span>
+              <ShieldCheck className="size-4 text-[#4f46e5]" />
             </button>
             <a
               href="#how-it-works"
@@ -630,8 +688,15 @@ export default function App() {
         )}
       </header>
 
-      {/* Main View Router: Student Dashboard (/dashboard) or Landing Page (/) */}
-      {isDashboard ? (
+      {/* Main View Router: Admin Studio (/admin), Student Dashboard (/dashboard) or Landing Page (/) */}
+      {isAdmin ? (
+        <AdminPanel
+          onBackToApp={() => navigate(user ? '/dashboard' : '/')}
+          onCourseModified={() => {
+            fetchLandingCourses();
+          }}
+        />
+      ) : isDashboard ? (
         <StudentDashboard onBackToExplore={() => navigate('/')} />
       ) : (
         <>
@@ -1011,314 +1076,125 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3 Course Cards Grid (AOS: fade-up staggered, with Udemy UI Badges) */}
+              {/* Dynamic Course Cards Grid (Synchronized with Admin Studio & Cloudinary) */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px]">
-
-                {/* COURSE CARD 1: Product Design */}
-                <div
-                  data-aos="fade-up"
-                  data-aos-delay="100"
-                  className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group"
-                >
-                  {/* Thumbnail banner */}
-                  <div className="bg-gradient-to-r from-[#312e81] to-[#6d28d9] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
-                    <div className="absolute right-[-40px] top-[-80px] size-[340px] pointer-events-none opacity-80">
-                      <img src="/assets/ambient-glow.svg" alt="" className="w-full h-full" />
-                    </div>
-                    <div className="absolute inset-0 bg-[#0f172a]/25 pointer-events-none" />
-
-                    <div className="flex items-center justify-between z-10">
-                      <p className="font-bold text-[11px] tracking-[2px] text-white/90 uppercase">
-                        THE PRODUCT SERIES
-                      </p>
-                      {/* Udemy Wishlist Heart Button */}
-                      <button
-                        onClick={(e) => toggleWishlist('course-1', e)}
-                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white transition"
-                        title="Save to wishlist"
+                {loadingLandingCourses ? (
+                  <div className="col-span-full py-16 flex flex-col items-center justify-center text-slate-400 gap-2">
+                    <div className="size-6 border-2 border-[#a435f0] border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs font-semibold">Loading courses from InternWala engine...</span>
+                  </div>
+                ) : landingCourses.length === 0 ? (
+                  <div className="col-span-full py-16 text-center text-slate-400 text-sm">
+                    No courses published yet. Use Admin Studio to publish your first masterclass!
+                  </div>
+                ) : (
+                  landingCourses.map((course, idx) => {
+                    const isEnrolled = enrolledCourses.includes(course.id);
+                    return (
+                      <div
+                        key={course.id}
+                        data-aos="fade-up"
+                        data-aos-delay={(idx + 1) * 100}
+                        className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group"
                       >
-                        <Heart className={`size-3.5 ${wishlistActive['course-1'] ? 'fill-white' : ''}`} />
-                      </button>
-                    </div>
+                        {/* Thumbnail banner with Cloudinary support */}
+                        <div
+                          className="h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white"
+                          style={{
+                            background: course.thumbnail
+                              ? `url(${course.thumbnail}) center / cover no-repeat`
+                              : `linear-gradient(to right, ${course.gradientFrom || "#312e81"}, ${course.gradientTo || "#6d28d9"})`,
+                          }}
+                        >
+                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[0.5px]" />
+                          <div className="flex items-center justify-between z-10">
+                            <p className="font-bold text-[11px] tracking-[2px] text-white/90 uppercase">
+                              {course.series || "THE CAREER SERIES"}
+                            </p>
+                            <button
+                              onClick={(e) => toggleWishlist(course.id, e)}
+                              className="p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white transition"
+                              title="Save to wishlist"
+                            >
+                              <Heart className={`size-3.5 ${wishlistActive[course.id] ? "fill-white" : ""}`} />
+                            </button>
+                          </div>
 
-                    <div className="flex items-end justify-between z-10">
-                      <div className="font-extrabold text-[27px] leading-[1.06] tracking-[-1px]">
-                        <p>Design with</p>
-                        <p>intent.</p>
-                      </div>
-                      <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
-                        <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Course information */}
-                  <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
-                    <div className="flex flex-col gap-[12px]">
-                      <div className="flex items-center justify-between">
-                        <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
-                          Product design
-                        </span>
-                        {/* Udemy Style Rating */}
-                        <span className="text-[#b4690e] dark:text-amber-400 text-[12px] font-bold">
-                          ★ 4.9 <span className="text-slate-400 font-normal">(128)</span>
-                        </span>
-                      </div>
-
-                      <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors group-hover:text-[#a435f0]">
-                        Product Design, from insight to impact
-                      </h3>
-
-                      <p className="text-[#475569] dark:text-slate-400 text-[14px]">
-                        Maya Chen · 12 lessons · 6 hours
-                      </p>
-
-                      {/* Udemy-style Bestseller badge */}
-                      <div className="flex items-center gap-2">
-                        <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[11px] px-2 py-0.5 rounded">
-                          Bestseller
-                        </span>
-                        <span className="text-[11px] text-slate-400">Internship Project Included</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-[16px] pt-2">
-                      <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
-                      <div className="flex items-center justify-between">
-                        <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                          <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
-                          <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
-                            Locked
-                          </span>
+                          <div className="flex items-end justify-between z-10">
+                            <div className="font-extrabold text-[24px] leading-[1.1] tracking-[-1px] line-clamp-2">
+                              {course.tagline || course.title}
+                            </div>
+                            <div className="size-[42px] rounded-[10px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm shrink-0">
+                              <img src="/assets/lock.svg" alt="Lock status" className="size-[22px]" />
+                            </div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-[#a435f0] dark:text-[#c084fc] text-[15px]">
-                            $200 →
-                          </span>
-                          <button
-                            onClick={() => {
-                              if (enrolledCourses.includes('c1111111-1111-1111-1111-111111111111')) {
-                                const el = document.getElementById('how-it-works');
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                              } else {
-                                enrollInCourse('c1111111-1111-1111-1111-111111111111');
-                              }
-                            }}
-                            className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${enrolledCourses.includes('c1111111-1111-1111-1111-111111111111')
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
-                              }`}
-                          >
-                            {enrolledCourses.includes('c1111111-1111-1111-1111-111111111111') ? '✓ Unlocked' : 'Enroll'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
-                {/* COURSE CARD 2: Systems Thinking */}
-                <div
-                  data-aos="fade-up"
-                  data-aos-delay="200"
-                  className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group"
-                >
-                  {/* Thumbnail banner */}
-                  <div className="bg-[#0f766e] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
-                    <div className="absolute right-[-40px] top-[-80px] size-[340px] pointer-events-none opacity-80">
-                      <img src="/assets/ambient-glow.svg" alt="" className="w-full h-full" />
-                    </div>
-                    <div className="absolute inset-0 bg-[#0f172a]/25 pointer-events-none" />
+                        {/* Course Information */}
+                        <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
+                          <div className="flex flex-col gap-[12px]">
+                            <div className="flex items-center justify-between">
+                              <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
+                                {course.category || "Professional Skill"}
+                              </span>
+                              <span className="text-[#b4690e] dark:text-amber-400 text-[12px] font-bold">
+                                ★ {course.rating || "4.9"} <span className="text-slate-400 font-normal">({course.reviewCount || 128})</span>
+                              </span>
+                            </div>
 
-                    <div className="flex items-center justify-between z-10">
-                      <p className="font-bold text-[11px] tracking-[2px] text-white/90 uppercase">
-                        THE STRATEGY SERIES
-                      </p>
-                      <button
-                        onClick={(e) => toggleWishlist('course-2', e)}
-                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white transition"
-                        title="Save to wishlist"
-                      >
-                        <Heart className={`size-3.5 ${wishlistActive['course-2'] ? 'fill-white' : ''}`} />
-                      </button>
-                    </div>
+                            <h3 className="font-bold text-[#0f172a] dark:text-white text-[19px] leading-[1.3] transition-colors group-hover:text-[#a435f0] line-clamp-2">
+                              {course.title}
+                            </h3>
 
-                    <div className="flex items-end justify-between z-10">
-                      <div className="font-extrabold text-[27px] leading-[1.06] tracking-[-1px]">
-                        <p>Think in</p>
-                        <p>systems.</p>
-                      </div>
-                      <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
-                        <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
-                      </div>
-                    </div>
-                  </div>
+                            <p className="text-[#475569] dark:text-slate-400 text-[14px]">
+                              {course.instructor || "Lead Instructor"} · {course.lessonCount || 12} lessons · {course.durationHours || 6} hours
+                            </p>
 
-                  {/* Course information */}
-                  <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
-                    <div className="flex flex-col gap-[12px]">
-                      <div className="flex items-center justify-between">
-                        <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
-                          Product strategy
-                        </span>
-                        <span className="text-[#b4690e] dark:text-amber-400 text-[12px] font-bold">
-                          ★ 4.9 <span className="text-slate-400 font-normal">(128)</span>
-                        </span>
-                      </div>
+                            <div className="flex items-center gap-2">
+                              <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[11px] px-2 py-0.5 rounded">
+                                {course.badge || "Bestseller"}
+                              </span>
+                              <span className="text-[11px] text-slate-400">{course.level || "All Levels"}</span>
+                            </div>
+                          </div>
 
-                      <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors group-hover:text-[#a435f0]">
-                        Systems thinking for product teams
-                      </h3>
-
-                      <p className="text-[#475569] dark:text-slate-400 text-[14px]">
-                        Jordan Lee · 12 lessons · 6 hours
-                      </p>
-
-                      {/* Udemy-style Highest Rated badge */}
-                      <div className="flex items-center gap-2">
-                        <span className="bg-[#f6ecfd] text-[#a435f0] border border-[#a435f0]/30 font-bold text-[11px] px-2 py-0.5 rounded">
-                          Highest Rated
-                        </span>
-                        <span className="text-[11px] text-slate-400">Team Case Studies</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-[16px] pt-2">
-                      <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
-                      <div className="flex items-center justify-between">
-                        <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                          <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
-                          <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
-                            Locked
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-[#a435f0] dark:text-[#c084fc] text-[15px]">
-                            $200 →
-                          </span>
-                          <button
-                            onClick={() => {
-                              if (enrolledCourses.includes('c2222222-2222-2222-2222-222222222222')) {
-                                const el = document.getElementById('how-it-works');
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                              } else {
-                                enrollInCourse('c2222222-2222-2222-2222-222222222222');
-                              }
-                            }}
-                            className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${enrolledCourses.includes('c2222222-2222-2222-2222-222222222222')
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
-                              }`}
-                          >
-                            {enrolledCourses.includes('c2222222-2222-2222-2222-222222222222') ? '✓ Unlocked' : 'Enroll'}
-                          </button>
+                          <div className="flex flex-col gap-[16px] pt-2">
+                            <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
+                            <div className="flex items-center justify-between">
+                              <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
+                                <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
+                                <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
+                                  {isEnrolled ? "Unlocked" : "Locked"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-[#a435f0] dark:text-[#c084fc] text-[15px]">
+                                  ${((course.priceCents || 20000) / 100).toFixed(0)} →
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    if (isEnrolled) {
+                                      navigate("/dashboard");
+                                    } else {
+                                      enrollInCourse(course.id);
+                                    }
+                                  }}
+                                  className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${
+                                    isEnrolled
+                                      ? "bg-emerald-600 text-white"
+                                      : "bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200"
+                                  }`}
+                                >
+                                  {isEnrolled ? "✓ Unlocked" : "Enroll"}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* COURSE CARD 3: Brand Design */}
-                <div
-                  data-aos="fade-up"
-                  data-aos-delay="300"
-                  className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group"
-                >
-                  {/* Thumbnail banner */}
-                  <div className="bg-gradient-to-r from-[#7c2d12] to-[#b45309] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
-                    <div className="absolute right-[-40px] top-[-80px] size-[340px] pointer-events-none opacity-80">
-                      <img src="/assets/ambient-glow.svg" alt="" className="w-full h-full" />
-                    </div>
-                    <div className="absolute inset-0 bg-[#0f172a]/25 pointer-events-none" />
-
-                    <div className="flex items-center justify-between z-10">
-                      <p className="font-bold text-[11px] tracking-[2px] text-white/90 uppercase">
-                        THE CREATIVE SERIES
-                      </p>
-                      <button
-                        onClick={(e) => toggleWishlist('course-3', e)}
-                        className="p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white transition"
-                        title="Save to wishlist"
-                      >
-                        <Heart className={`size-3.5 ${wishlistActive['course-3'] ? 'fill-white' : ''}`} />
-                      </button>
-                    </div>
-
-                    <div className="flex items-end justify-between z-10">
-                      <div className="font-extrabold text-[27px] leading-[1.06] tracking-[-1px]">
-                        <p>Make it</p>
-                        <p>meaningful.</p>
-                      </div>
-                      <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
-                        <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Course information */}
-                  <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
-                    <div className="flex flex-col gap-[12px]">
-                      <div className="flex items-center justify-between">
-                        <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
-                          Brand design
-                        </span>
-                        <span className="text-[#b4690e] dark:text-amber-400 text-[12px] font-bold">
-                          ★ 4.9 <span className="text-slate-400 font-normal">(128)</span>
-                        </span>
-                      </div>
-
-                      <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors group-hover:text-[#a435f0]">
-                        Build a brand people believe in
-                      </h3>
-
-                      <p className="text-[#475569] dark:text-slate-400 text-[14px]">
-                        Jordan Lee · 12 lessons · 6 hours
-                      </p>
-
-                      {/* Udemy-style Bestseller badge */}
-                      <div className="flex items-center gap-2">
-                        <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[11px] px-2 py-0.5 rounded">
-                          Bestseller
-                        </span>
-                        <span className="text-[11px] text-slate-400">Creative Portfolio Asset</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-[16px] pt-2">
-                      <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
-                      <div className="flex items-center justify-between">
-                        <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                          <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
-                          <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
-                            Locked
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-[#a435f0] dark:text-[#c084fc] text-[15px]">
-                            $200 →
-                          </span>
-                          <button
-                            onClick={() => {
-                              if (enrolledCourses.includes('c3333333-3333-3333-3333-333333333333')) {
-                                const el = document.getElementById('how-it-works');
-                                if (el) el.scrollIntoView({ behavior: 'smooth' });
-                              } else {
-                                enrollInCourse('c3333333-3333-3333-3333-333333333333');
-                              }
-                            }}
-                            className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${enrolledCourses.includes('c3333333-3333-3333-3333-333333333333')
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
-                              }`}
-                          >
-                            {enrolledCourses.includes('c3333333-3333-3333-3333-333333333333') ? '✓ Unlocked' : 'Enroll'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
+                    );
+                  })
+                )}
               </div>
 
               {/* Explore all courses text button (AOS: fade-up) */}

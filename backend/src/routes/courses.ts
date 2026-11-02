@@ -25,10 +25,23 @@ export interface CourseData {
   series: string;
   tagline: string;
   badge?: string;
+  status?: 'published' | 'draft';
+  outcomes?: string[];
+  requirements?: string[];
   gradientFrom: string;
   gradientTo: string;
   accentColor: string;
-  lessons: Array<{ id: string; title: string; lessonNumber: number; duration: string }>;
+  lessons: Array<{
+    id: string;
+    title: string;
+    lessonNumber: number;
+    duration: string;
+    videoAssetId?: string;
+    videoUrl?: string;
+    isFreePreview?: boolean;
+    sectionTitle?: string;
+    resources?: Array<{ name: string; url: string; size?: string }>;
+  }>;
 }
 
 // Initial seed courses as defined in Figma (Frames 3:117751, 3:118064) and PRD
@@ -251,6 +264,21 @@ function getUserCourseProgress(userId: string, course: CourseData, isEnrolled: b
   }
   return defaultState;
 }
+
+// ============================================================================
+// 0. GET /api/courses/public (Open Catalog for Landing Page & Visitors)
+// ============================================================================
+router.get('/public', async (_req: Request, res: Response) => {
+  try {
+    const published = initialCourses.filter((c) => c.status !== 'draft');
+    return res.status(200).json({
+      success: true,
+      courses: published,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to fetch public course catalog.' });
+  }
+});
 
 // ============================================================================
 // 1. GET /api/courses/dashboard (FR-14, FR-15, FR-16, FR-17, FR-18)
