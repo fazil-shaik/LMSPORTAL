@@ -11,9 +11,14 @@ import {
   Heart,
   Globe,
   ChevronDown,
+  LogOut,
+  Settings,
 } from 'lucide-react';
 import AOS from 'aos';
 import 'aos/dist/aos.css';
+import { useAuth } from './context/AuthContext';
+import AuthModal from './components/AuthModal';
+import AccountSettingsModal from './components/AccountSettingsModal';
 
 export default function App() {
   // Theme state: light or dark
@@ -62,7 +67,9 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [cartCount, setCartCount] = useState(0);
+  // Authentication Context Hook
+  const { user, openAuthModal, openSettingsModal, signOut, enrolledCourses, enrollInCourse } = useAuth();
+  const cartCount = enrolledCourses.length;
   const [wishlistActive, setWishlistActive] = useState<Record<string, boolean>>({});
   const [bannerVisible, setBannerVisible] = useState(true);
 
@@ -126,12 +133,6 @@ export default function App() {
       ...prev,
       [id]: !prev[id],
     }));
-  };
-
-  const addToCart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setCartCount((prev) => prev + 1);
   };
 
   // Step information for interactive video slide
@@ -325,20 +326,81 @@ export default function App() {
               )}
             </button>
 
-            {/* Udemy-style Outlined Sign In button */}
-            <button
-              className="hidden sm:inline-flex border border-[#2d2f31] dark:border-slate-600 font-bold text-[13px] text-[#2d2f31] dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 px-3.5 py-2 rounded-[4px] transition cursor-pointer"
-            >
-              Sign in
-            </button>
+            {/* User Account / Auth Actions */}
+            {user ? (
+              <div className="flex items-center gap-2 sm:gap-2.5">
+                {/* Email Verification Banner indicator if not verified */}
+                {!user.emailVerified && (
+                  <button
+                    onClick={() => openAuthModal('verify')}
+                    className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-full text-xs font-semibold hover:bg-amber-100 transition shadow-xs"
+                    title="Email verification required before purchasing courses"
+                  >
+                    <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>Verify Email</span>
+                  </button>
+                )}
 
-            {/* Udemy-style Solid Get Started button */}
-            <a
-              href="#courses"
-              className="bg-[#2d2f31] dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-[#2d2f31] px-4 py-2 rounded-[4px] font-bold text-[13px] shadow-sm transition active:scale-[0.98] inline-flex items-center justify-center"
-            >
-              Get started
-            </a>
+                {/* Account profile card opening Settings */}
+                <button
+                  onClick={() => openSettingsModal('profile')}
+                  className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition cursor-pointer text-left"
+                  title="Open Account Settings"
+                >
+                  <div className="size-6 rounded-full bg-[#4f46e5] text-white flex items-center justify-center text-xs font-bold uppercase overflow-hidden">
+                    {user.avatarUrl ? (
+                      <img src={user.avatarUrl} alt={user.name} className="size-full object-cover" />
+                    ) : (
+                      user.name.charAt(0)
+                    )}
+                  </div>
+                  <div className="hidden sm:flex flex-col text-left">
+                    <span className="font-bold text-xs leading-none text-[#0f172a] dark:text-white max-w-[100px] truncate">
+                      {user.name}
+                    </span>
+                    <span className="text-[10px] text-[#4f46e5] dark:text-[#a5b4fc] capitalize font-medium flex items-center gap-1">
+                      <span>{user.role}</span>
+                      {user.emailVerified && <span className="text-emerald-500 font-bold">✓</span>}
+                    </span>
+                  </div>
+                </button>
+
+                {/* Settings shortcut button */}
+                <button
+                  onClick={() => openSettingsModal('profile')}
+                  className="p-2 text-slate-500 hover:text-[#4f46e5] dark:hover:text-[#818cf8] transition rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Account Settings (FR-10, FR-11, FR-13)"
+                  aria-label="Settings"
+                >
+                  <Settings className="size-4" />
+                </button>
+
+                {/* Sign out button */}
+                <button
+                  onClick={signOut}
+                  className="p-2 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title="Sign out"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="size-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="hidden sm:flex items-center gap-2">
+                <button
+                  onClick={() => openAuthModal('signin')}
+                  className="border border-[#2d2f31] dark:border-slate-600 font-bold text-[13px] text-[#2d2f31] dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 px-3.5 py-2 rounded-[4px] transition cursor-pointer"
+                >
+                  Sign in
+                </button>
+                <button
+                  onClick={() => openAuthModal('signup')}
+                  className="bg-[#2d2f31] dark:bg-white hover:bg-black dark:hover:bg-slate-200 text-white dark:text-[#2d2f31] px-4 py-2 rounded-[4px] font-bold text-[13px] shadow-sm transition active:scale-[0.98] inline-flex items-center justify-center cursor-pointer"
+                >
+                  Get started
+                </button>
+              </div>
+            )}
 
             {/* Language Globe icon */}
             <button
@@ -395,19 +457,73 @@ export default function App() {
               Our story
             </a>
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-3">
-              <button
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-full text-left font-medium text-[#475569] dark:text-slate-300 py-2 text-base"
-              >
-                Sign in
-              </button>
-              <a
-                href="#courses"
-                onClick={() => setMobileMenuOpen(false)}
-                className="bg-[#a435f0] text-white py-3 rounded-lg text-center font-bold text-sm"
-              >
-                Get started
-              </a>
+              {user ? (
+                <div className="flex flex-col gap-2 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="size-8 rounded-full bg-[#4f46e5] text-white flex items-center justify-center font-bold">
+                        {user.name.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-[#0f172a] dark:text-white">{user.name}</p>
+                        <p className="text-xs text-slate-500">{user.email}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        signOut();
+                        setMobileMenuOpen(false);
+                      }}
+                      className="text-xs font-bold text-rose-500 py-1 px-2 border border-rose-200 dark:border-rose-900 rounded"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+
+                  {!user.emailVerified && (
+                    <button
+                      onClick={() => {
+                        setMobileMenuOpen(false);
+                        openAuthModal('verify');
+                      }}
+                      className="w-full text-center py-2 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-lg text-xs font-semibold"
+                    >
+                      ⚠️ Verify email to unlock course purchases
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      openSettingsModal('profile');
+                    }}
+                    className="w-full text-center py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold"
+                  >
+                    Account Settings
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      openAuthModal('signin');
+                    }}
+                    className="w-full text-left font-medium text-[#475569] dark:text-slate-300 py-2 text-base"
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      openAuthModal('signup');
+                    }}
+                    className="bg-[#a435f0] text-white py-3 rounded-lg text-center font-bold text-sm"
+                  >
+                    Get started
+                  </button>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -867,10 +983,21 @@ export default function App() {
                         $200 →
                       </span>
                       <button
-                        onClick={addToCart}
-                        className="bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200 text-xs font-bold px-3 py-1.5 rounded transition"
+                        onClick={() => {
+                          if (enrolledCourses.includes('c1111111-1111-1111-1111-111111111111')) {
+                            const el = document.getElementById('how-it-works');
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                          } else {
+                            enrollInCourse('c1111111-1111-1111-1111-111111111111');
+                          }
+                        }}
+                        className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${
+                          enrolledCourses.includes('c1111111-1111-1111-1111-111111111111')
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
+                        }`}
                       >
-                        Enroll
+                        {enrolledCourses.includes('c1111111-1111-1111-1111-111111111111') ? '✓ Unlocked' : 'Enroll'}
                       </button>
                     </div>
                   </div>
@@ -958,10 +1085,21 @@ export default function App() {
                         $200 →
                       </span>
                       <button
-                        onClick={addToCart}
-                        className="bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200 text-xs font-bold px-3 py-1.5 rounded transition"
+                        onClick={() => {
+                          if (enrolledCourses.includes('c2222222-2222-2222-2222-222222222222')) {
+                            const el = document.getElementById('how-it-works');
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                          } else {
+                            enrollInCourse('c2222222-2222-2222-2222-222222222222');
+                          }
+                        }}
+                        className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${
+                          enrolledCourses.includes('c2222222-2222-2222-2222-222222222222')
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
+                        }`}
                       >
-                        Enroll
+                        {enrolledCourses.includes('c2222222-2222-2222-2222-222222222222') ? '✓ Unlocked' : 'Enroll'}
                       </button>
                     </div>
                   </div>
@@ -1049,10 +1187,21 @@ export default function App() {
                         $200 →
                       </span>
                       <button
-                        onClick={addToCart}
-                        className="bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200 text-xs font-bold px-3 py-1.5 rounded transition"
+                        onClick={() => {
+                          if (enrolledCourses.includes('c3333333-3333-3333-3333-333333333333')) {
+                            const el = document.getElementById('how-it-works');
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                          } else {
+                            enrollInCourse('c3333333-3333-3333-3333-333333333333');
+                          }
+                        }}
+                        className={`text-xs font-bold px-3 py-1.5 rounded transition cursor-pointer ${
+                          enrolledCourses.includes('c3333333-3333-3333-3333-333333333333')
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200'
+                        }`}
                       >
-                        Enroll
+                        {enrolledCourses.includes('c3333333-3333-3333-3333-333333333333') ? '✓ Unlocked' : 'Enroll'}
                       </button>
                     </div>
                   </div>
@@ -1576,6 +1725,12 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Authentication & Authorization Modal (Figma Sign In & Sign Up) */}
+      <AuthModal />
+
+      {/* Account Settings Modal (Figma 3:119960 - Desktop Account Settings) */}
+      <AccountSettingsModal />
     </div>
   );
 }

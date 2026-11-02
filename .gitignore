@@ -1,4 +1,13 @@
 dist
 .env
-,env*
+.env*
+!.env.example
 node_modules
+backend/node_modules
+backend/dist
+backend/.env
+backend/.env*
+!backend/.env.example
+.DS_Store
+.env.example
+drizzle/
