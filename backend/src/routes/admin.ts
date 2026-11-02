@@ -7,14 +7,43 @@ import { eq, desc } from 'drizzle-orm';
 
 const router = Router();
 
-// Middleware: Verify Admin access (with safe student fallback for seamless development review)
+// Middleware: STRICT ADMIN ONLY. Students and unauthenticated visitors are completely blocked.
 const verifyAdminAccess = (req: Request, res: Response, next: Function) => {
   if (!req.user) {
-    return res.status(401).json({ success: false, message: 'Authentication required.' });
+    return res.status(401).json({
+      success: false,
+      code: 'UNAUTHORIZED',
+      message: 'Authentication required. Please sign in with an administrator account.',
+    });
   }
-  // Allow all logged-in users to review admin tools in dev mode, or enforce role === 'admin'
+
+  // Strict role check: role must strictly equal 'admin'
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      code: 'FORBIDDEN_ADMIN_ONLY',
+      message: 'Access Denied: This is a restricted administrative studio. Students and standard accounts are not permitted.',
+    });
+  }
+
   next();
 };
+
+// ============================================================================
+// 0. GET /api/admin/verify (Strict check verifying active administrator session)
+// ============================================================================
+router.get('/verify', authenticate, verifyAdminAccess, (req: Request, res: Response) => {
+  return res.status(200).json({
+    success: true,
+    isAdmin: true,
+    adminUser: {
+      id: req.user!.id,
+      name: req.user!.name,
+      email: req.user!.email,
+      role: req.user!.role,
+    },
+  });
+});
 
 // ============================================================================
 // Fallback in-memory stores for Purchases, Refunds, Feedback, and Notifications
