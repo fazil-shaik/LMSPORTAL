@@ -8,20 +8,31 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+        sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
+        udemy: {
+          purple: '#a435f0',
+          purpleDark: '#8710d8',
+          purpleLight: '#f6ecfd',
+          dark: '#2d2f31',
+          grayBg: '#f7f9fa',
+          border: '#d1d7dc',
+          rating: '#b4690e',
+          bestsellerBg: '#eceb98',
+          bestsellerText: '#3d3c0a',
+        },
         brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
+          50: '#f5f3ff',
+          100: '#ede9fe',
+          200: '#ddd6fe',
+          300: '#c4b5fd',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#a435f0',
+          700: '#8710d8',
+          800: '#6b21a8',
+          900: '#581c87',
         },
         navy: {
           900: '#171538',
