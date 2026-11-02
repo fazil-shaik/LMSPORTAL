@@ -3,18 +3,62 @@ import {
   Menu,
   X,
   VolumeX,
-  BadgeCheck,
-  Layers,
+  Sun,
+  Moon,
   Sparkles,
 } from 'lucide-react';
+import AOS from 'aos';
+import 'aos/dist/aos.css';
 
 export default function App() {
+  // Theme state: light or dark
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('theme');
+      if (saved === 'dark' || saved === 'light') return saved;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'light';
+  });
+
+  // Apply theme to document element
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  // Initialize AOS animations on mount
+  useEffect(() => {
+    AOS.init({
+      duration: 750,
+      easing: 'ease-out-cubic',
+      once: false,
+      mirror: true,
+      offset: 40,
+    });
+  }, []);
+
+  // Re-refresh AOS when theme changes to ensure layout offsets are clean
+  useEffect(() => {
+    AOS.refresh();
+  }, [theme]);
+
   // Mobile navigation state
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Video player interactive state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(768); // 12:48 in seconds (768s out of 1800s)
+  const [currentTime, setCurrentTime] = useState(768); // 12:48 in seconds
   const [activeStep, setActiveStep] = useState<number>(3); // 1: Observation, 2: Human need, 3: Opportunity
   const [playbackSpeed, setPlaybackSpeed] = useState<string>('1×');
   const [isMuted, setIsMuted] = useState(false);
@@ -28,9 +72,6 @@ export default function App() {
     3: false,
     4: false,
   });
-
-  // Selected course for preview modal
-  const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
 
   // Video progress animation when playing
   useEffect(() => {
@@ -88,11 +129,14 @@ export default function App() {
   };
 
   return (
-    <div className="bg-white text-[#0f172a] font-sans antialiased min-h-screen flex flex-col selection:bg-[#4f46e5] selection:text-white">
+    <div className="bg-white dark:bg-[#0a0d16] text-[#0f172a] dark:text-[#f1f5f9] font-sans antialiased min-h-screen flex flex-col selection:bg-[#4f46e5] selection:text-white transition-colors duration-300">
       {/* =========================================================================
-          1. NAVIGATION BAR
+          1. NAVIGATION BAR (with AOS fade-down)
          ========================================================================= */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-[#e2e8f0] sticky top-0 z-50 transition-all duration-200">
+      <header
+        data-aos="fade-down"
+        className="bg-white/95 dark:bg-[#0a0d16]/95 backdrop-blur-md border-b border-[#e2e8f0] dark:border-slate-800/80 sticky top-0 z-50 transition-colors duration-200"
+      >
         <div className="max-w-[1440px] mx-auto px-6 sm:px-10 lg:px-[80px] h-[80px] flex items-center justify-between">
           {/* LMS Portal Brand */}
           <a href="#" className="flex items-center gap-[10px] group focus:outline-none">
@@ -102,13 +146,11 @@ export default function App() {
                 alt="LMS Portal"
                 className="size-[20px]"
                 onError={(e) => {
-                  // Fallback if svg asset isn't resolved
                   (e.target as HTMLElement).style.display = 'none';
                 }}
               />
-              <Layers className="size-[18px] text-white hidden" />
             </div>
-            <span className="font-extrabold text-[19px] tracking-[-0.5px] text-[#0f172a]">
+            <span className="font-extrabold text-[19px] tracking-[-0.5px] text-[#0f172a] dark:text-white transition-colors">
               LMS Portal
             </span>
           </a>
@@ -117,81 +159,91 @@ export default function App() {
           <nav className="hidden md:flex items-center gap-[32px] text-[14px]">
             <a
               href="#courses"
-              className="font-bold text-[#4f46e5] transition-colors"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] transition-colors"
             >
               Explore courses
             </a>
             <a
               href="#how-it-works"
-              className="font-medium text-[#475569] hover:text-[#0f172a] transition-colors"
+              className="font-medium text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white transition-colors"
             >
               How it works
             </a>
             <a
               href="#our-story"
-              className="font-medium text-[#475569] hover:text-[#0f172a] transition-colors"
+              className="font-medium text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white transition-colors"
             >
               Our story
             </a>
           </nav>
 
-          {/* Account Actions */}
-          <div className="hidden sm:flex items-center gap-[16px]">
+          {/* Account Actions & Dark Mode Toggle */}
+          <div className="flex items-center gap-[12px] sm:gap-[16px]">
+            {/* Theme Toggle Button */}
             <button
-              onClick={() => setSelectedCourse("Sign In")}
-              className="font-normal text-[14px] text-[#475569] hover:text-[#0f172a] px-3 py-2 transition-colors cursor-pointer"
+              onClick={toggleTheme}
+              aria-label="Toggle Dark Mode"
+              className="p-2.5 rounded-lg border border-[#e2e8f0] dark:border-slate-800 text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white bg-slate-50 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all duration-200"
+              title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="size-[18px] text-amber-400 animate-spin-slow" />
+              ) : (
+                <Moon className="size-[18px] text-slate-700" />
+              )}
+            </button>
+
+            <button
+              className="hidden sm:inline-flex font-normal text-[14px] text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white px-3 py-2 transition-colors cursor-pointer"
             >
               Sign in
             </button>
             <a
               href="#courses"
-              className="bg-white hover:bg-slate-50 border border-[#e2e8f0] px-[20px] py-[12px] rounded-[8px] font-bold text-[14px] text-[#0f172a] shadow-sm transition hover:border-slate-300 active:scale-[0.98] inline-flex items-center justify-center"
+              className="bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-[#e2e8f0] dark:border-slate-700 px-[20px] py-[12px] rounded-[8px] font-bold text-[14px] text-[#0f172a] dark:text-white shadow-sm transition hover:border-slate-300 dark:hover:border-slate-600 active:scale-[0.98] inline-flex items-center justify-center"
             >
               Get started
             </a>
-          </div>
 
-          {/* Mobile Hamburger Button */}
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden p-2 rounded-lg text-[#475569] hover:text-[#0f172a] hover:bg-slate-100 transition"
-            aria-label="Toggle Navigation Menu"
-          >
-            {mobileMenuOpen ? <X className="size-6" /> : <Menu className="size-6" />}
-          </button>
+            {/* Mobile Hamburger Button */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="md:hidden p-2 rounded-lg text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              aria-label="Toggle Navigation Menu"
+            >
+              {mobileMenuOpen ? <X className="size-6" /> : <Menu className="size-6" />}
+            </button>
+          </div>
         </div>
 
         {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-[#e2e8f0] bg-white px-6 py-4 flex flex-col gap-4 shadow-lg animate-fadeIn">
+          <div className="md:hidden border-t border-[#e2e8f0] dark:border-slate-800 bg-white dark:bg-[#0a0d16] px-6 py-4 flex flex-col gap-4 shadow-lg animate-fadeIn">
             <a
               href="#courses"
               onClick={() => setMobileMenuOpen(false)}
-              className="font-bold text-[#4f46e5] py-2 text-base"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] py-2 text-base"
             >
               Explore courses
             </a>
             <a
               href="#how-it-works"
               onClick={() => setMobileMenuOpen(false)}
-              className="font-medium text-[#475569] hover:text-[#0f172a] py-2 text-base"
+              className="font-medium text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white py-2 text-base"
             >
               How it works
             </a>
             <a
               href="#our-story"
               onClick={() => setMobileMenuOpen(false)}
-              className="font-medium text-[#475569] hover:text-[#0f172a] py-2 text-base"
+              className="font-medium text-[#475569] dark:text-slate-300 hover:text-[#0f172a] dark:hover:text-white py-2 text-base"
             >
               Our story
             </a>
-            <div className="pt-2 border-t border-slate-100 flex flex-col gap-3">
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-3">
               <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  setSelectedCourse("Sign In");
-                }}
-                className="w-full text-left font-medium text-[#475569] py-2 text-base"
+                onClick={() => setMobileMenuOpen(false)}
+                className="w-full text-left font-medium text-[#475569] dark:text-slate-300 py-2 text-base"
               >
                 Sign in
               </button>
@@ -208,11 +260,11 @@ export default function App() {
       </header>
 
       {/* =========================================================================
-          2. GRADIENT MESH HERO SECTION
+          2. GRADIENT MESH HERO SECTION (Top-down & Bottom-up AOS)
          ========================================================================= */}
-      <section className="bg-gradient-to-r from-[#f8faff] via-[#eef2ff] via-[60%] to-[#f5f3ff] relative overflow-hidden pb-[64px] pt-[60px] md:pt-[80px]">
+      <section className="bg-gradient-to-r from-[#f8faff] via-[#eef2ff] via-[60%] to-[#f5f3ff] dark:from-[#080b14] dark:via-[#0e1224] dark:via-[60%] dark:to-[#110e24] relative overflow-hidden pb-[64px] pt-[60px] md:pt-[80px] transition-colors duration-300">
         {/* Violet mesh glow background decoration */}
-        <div className="absolute right-[-100px] lg:right-[-50px] top-[40px] size-[600px] pointer-events-none opacity-80 z-0 select-none">
+        <div className="absolute right-[-100px] lg:right-[-50px] top-[40px] size-[600px] pointer-events-none opacity-80 dark:opacity-40 z-0 select-none">
           <img
             src="/assets/violet-mesh-glow.svg"
             alt=""
@@ -225,8 +277,11 @@ export default function App() {
           <div className="flex flex-col lg:flex-row gap-[48px] items-center lg:items-start justify-between">
             {/* Left Column: Copy & Actions */}
             <div className="w-full lg:w-[560px] flex flex-col gap-[24px] items-start shrink-0">
-              {/* Status Badge */}
-              <div className="bg-[#eef2ff] border border-[#e0e7ff] px-[10px] py-[5px] rounded-[100px] inline-flex items-center gap-[6px] shadow-sm">
+              {/* Status Badge (AOS: fade-down) */}
+              <div
+                data-aos="fade-down"
+                className="bg-[#eef2ff] dark:bg-indigo-950/60 border border-[#e0e7ff] dark:border-indigo-800/80 px-[10px] py-[5px] rounded-[100px] inline-flex items-center gap-[6px] shadow-sm"
+              >
                 <img
                   src="/assets/sparkles.svg"
                   alt=""
@@ -235,57 +290,75 @@ export default function App() {
                     (e.target as HTMLElement).style.display = 'none';
                   }}
                 />
-                <Sparkles className="size-[13px] text-[#4f46e5] hidden" />
-                <span className="font-bold text-[#4f46e5] text-[12px] tracking-wider uppercase">
+                <Sparkles className="size-[13px] text-[#4f46e5] dark:text-[#818cf8] hidden" />
+                <span className="font-bold text-[#4f46e5] dark:text-[#a5b4fc] text-[12px] tracking-wider uppercase">
                   LEARN WITH INTENTION
                 </span>
               </div>
 
-              {/* High Impact Headline */}
-              <h1 className="font-extrabold text-[44px] sm:text-[56px] lg:text-[68px] leading-[1.08] tracking-[-2px] lg:tracking-[-3px] text-[#0f172a]">
+              {/* High Impact Headline (AOS: fade-up) */}
+              <h1
+                data-aos="fade-up"
+                data-aos-delay="100"
+                className="font-extrabold text-[44px] sm:text-[56px] lg:text-[68px] leading-[1.08] tracking-[-2px] lg:tracking-[-3px] text-[#0f172a] dark:text-white transition-colors"
+              >
                 Build skills.<br />
                 Find your edge.<br />
                 Make your mark.
               </h1>
 
-              {/* Subheading */}
-              <p className="text-[16px] sm:text-[18px] text-[#475569] leading-[1.5] max-w-[500px]">
+              {/* Subheading (AOS: fade-up) */}
+              <p
+                data-aos="fade-up"
+                data-aos-delay="150"
+                className="text-[16px] sm:text-[18px] text-[#475569] dark:text-slate-300 leading-[1.5] max-w-[500px] transition-colors"
+              >
                 Expert-led courses for people who want to do meaningful work. Learn at your pace. Put it into practice.
               </p>
 
-              {/* Primary Call to Action */}
-              <a
-                href="#courses"
-                className="bg-[#4f46e5] hover:bg-[#4338ca] text-white px-[20px] py-[12px] min-h-[48px] rounded-[8px] font-bold text-[14px] inline-flex items-center justify-center gap-[8px] transition-all shadow-md hover:shadow-lg active:scale-[0.98] group"
-              >
-                <img
-                  src="/assets/arrow-right.svg"
-                  alt=""
-                  className="size-[18px] group-hover:translate-x-1 transition-transform"
-                />
-                <span>Explore courses</span>
-              </a>
+              {/* Primary Call to Action (AOS: fade-up) */}
+              <div data-aos="fade-up" data-aos-delay="200">
+                <a
+                  href="#courses"
+                  className="bg-[#4f46e5] hover:bg-[#4338ca] text-white px-[20px] py-[12px] min-h-[48px] rounded-[8px] font-bold text-[14px] inline-flex items-center justify-center gap-[8px] transition-all shadow-md hover:shadow-lg active:scale-[0.98] group"
+                >
+                  <img
+                    src="/assets/arrow-right.svg"
+                    alt=""
+                    className="size-[18px] group-hover:translate-x-1 transition-transform"
+                  />
+                  <span>Explore courses</span>
+                </a>
+              </div>
 
-              {/* Social Proof */}
-              <div className="flex items-center gap-[12px] pt-1">
-                <span className="text-[#b45309] text-[18px] tracking-[2px] select-none font-bold">
+              {/* Social Proof (AOS: fade-up) */}
+              <div
+                data-aos="fade-up"
+                data-aos-delay="250"
+                className="flex items-center gap-[12px] pt-1"
+              >
+                <span className="text-[#b45309] dark:text-amber-500 text-[18px] tracking-[2px] select-none font-bold">
                   ★★★★★
                 </span>
-                <span className="text-[#475569] text-[12px] font-medium">
+                <span className="text-[#475569] dark:text-slate-400 text-[12px] font-medium transition-colors">
                   Loved by 2,400+ curious minds
                 </span>
               </div>
             </div>
 
-            {/* Right Column: Interactive Player Preview */}
-            <div className="w-full lg:flex-1 max-w-[620px] bg-white rounded-[16px] p-[12px] shadow-[0px_16px_48px_0px_rgba(49,46,129,0.13)] border border-[#e2e8f0]/80">
-              {/* Preview Toolbar */}
+            {/* Right Column: Interactive Player Preview (AOS: fade-up) */}
+            <div
+              data-aos="fade-up"
+              data-aos-delay="150"
+              className="w-full lg:flex-1 max-w-[620px] bg-white dark:bg-slate-900 rounded-[16px] p-[12px] shadow-[0px_16px_48px_0px_rgba(49,46,129,0.13)] dark:shadow-[0px_16px_48px_0px_rgba(0,0,0,0.5)] border border-[#e2e8f0]/80 dark:border-slate-800 transition-colors duration-300"
+            >
+              {/* Preview Toolbar (AOS: fade-down) */}
               <div className="flex items-center justify-between px-2 pt-2 pb-3">
-                <p className="font-bold text-[#0f172a] text-[12px] tracking-tight">
+                <p className="font-bold text-[#0f172a] dark:text-white text-[12px] tracking-tight">
                   A better way to learn
                 </p>
-                <div className="bg-[#eef2ff] px-[10px] py-[4px] rounded-[100px]">
-                  <span className="font-bold text-[#4f46e5] text-[12px]">
+                <div className="bg-[#eef2ff] dark:bg-indigo-950/70 border border-transparent dark:border-indigo-800/50 px-[10px] py-[4px] rounded-[100px]">
+                  <span className="font-bold text-[#4f46e5] dark:text-[#a5b4fc] text-[12px]">
                     A peek inside
                   </span>
                 </div>
@@ -468,10 +541,10 @@ export default function App() {
                   <img src="/assets/circle-play.svg" alt="Play" className="size-[36px]" />
                 </button>
                 <div className="flex flex-col">
-                  <p className="font-bold text-[#0f172a] text-[14px] leading-[1.3]">
+                  <p className="font-bold text-[#0f172a] dark:text-white text-[14px] leading-[1.3] transition-colors">
                     From insight to impact
                   </p>
-                  <p className="text-[#475569] text-[12px]">
+                  <p className="text-[#475569] dark:text-slate-400 text-[12px] transition-colors">
                     Maya Chen · Product Design
                   </p>
                 </div>
@@ -479,23 +552,27 @@ export default function App() {
             </div>
           </div>
 
-          {/* Hero Bottom Benefits Pills */}
-          <div className="flex flex-wrap gap-6 sm:gap-[48px] items-center pt-4 border-t border-slate-200/60">
+          {/* Hero Bottom Benefits Pills (AOS: fade-up) */}
+          <div
+            data-aos="fade-up"
+            data-aos-delay="200"
+            className="flex flex-wrap gap-6 sm:gap-[48px] items-center pt-4 border-t border-slate-200/60 dark:border-slate-800 transition-colors"
+          >
             <div className="flex items-center gap-[8px]">
-              <img src="/assets/clock-3.svg" alt="" className="size-[18px] text-[#475569]" />
-              <span className="font-semibold text-[#475569] text-[12px]">
+              <img src="/assets/clock-3.svg" alt="" className="size-[18px] text-[#475569] dark:brightness-125" />
+              <span className="font-semibold text-[#475569] dark:text-slate-300 text-[12px]">
                 Learn on your schedule
               </span>
             </div>
             <div className="flex items-center gap-[8px]">
-              <img src="/assets/graduation-cap.svg" alt="" className="size-[18px] text-[#475569]" />
-              <span className="font-semibold text-[#475569] text-[12px]">
+              <img src="/assets/graduation-cap.svg" alt="" className="size-[18px] text-[#475569] dark:brightness-125" />
+              <span className="font-semibold text-[#475569] dark:text-slate-300 text-[12px]">
                 Taught by working experts
               </span>
             </div>
             <div className="flex items-center gap-[8px]">
-              <img src="/assets/badge-check.svg" alt="" className="size-[18px] text-[#475569]" />
-              <span className="font-semibold text-[#475569] text-[12px]">
+              <img src="/assets/badge-check.svg" alt="" className="size-[18px] text-[#475569] dark:brightness-125" />
+              <span className="font-semibold text-[#475569] dark:text-slate-300 text-[12px]">
                 Certificates worth sharing
               </span>
             </div>
@@ -504,50 +581,61 @@ export default function App() {
       </section>
 
       {/* =========================================================================
-          3. TRUSTED BY AMBITIOUS TEAMS (EMPLOYER WORDMARKS)
+          3. TRUSTED BY AMBITIOUS TEAMS (Top-down header & Bottom-up logos)
          ========================================================================= */}
-      <section className="border-b border-[#e2e8f0] py-[40px] px-6 sm:px-10 lg:px-[80px]">
+      <section className="border-b border-[#e2e8f0] dark:border-slate-800 py-[40px] px-6 sm:px-10 lg:px-[80px] bg-white dark:bg-[#0a0d16] transition-colors duration-300">
         <div className="max-w-[1440px] mx-auto flex flex-col items-center gap-[24px]">
-          <p className="font-semibold text-[#64748b] text-[12px] tracking-[1.5px] uppercase text-center">
+          <p
+            data-aos="fade-down"
+            className="font-semibold text-[#64748b] dark:text-slate-400 text-[12px] tracking-[1.5px] uppercase text-center"
+          >
             WHERE OUR LEARNERS MAKE AN IMPACT
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-10 sm:gap-16 lg:gap-[80px] font-extrabold text-[#475569] text-[22px] sm:text-[24px] tracking-[-1px] select-none">
-            <span className="hover:text-[#0f172a] transition cursor-default">Notion</span>
-            <span className="hover:text-[#0f172a] transition cursor-default lowercase font-bold tracking-normal">stripe</span>
-            <span className="hover:text-[#0f172a] transition cursor-default">Linear</span>
-            <span className="hover:text-[#0f172a] transition cursor-default">Webflow</span>
-            <span className="hover:text-[#0f172a] transition cursor-default">Figma</span>
+          <div
+            data-aos="fade-up"
+            data-aos-delay="100"
+            className="flex flex-wrap items-center justify-center gap-10 sm:gap-16 lg:gap-[80px] font-extrabold text-[#475569] dark:text-slate-400 text-[22px] sm:text-[24px] tracking-[-1px] select-none"
+          >
+            <span className="hover:text-[#0f172a] dark:hover:text-white transition cursor-default">Notion</span>
+            <span className="hover:text-[#0f172a] dark:hover:text-white transition cursor-default lowercase font-bold tracking-normal">stripe</span>
+            <span className="hover:text-[#0f172a] dark:hover:text-white transition cursor-default">Linear</span>
+            <span className="hover:text-[#0f172a] dark:hover:text-white transition cursor-default">Webflow</span>
+            <span className="hover:text-[#0f172a] dark:hover:text-white transition cursor-default">Figma</span>
           </div>
         </div>
       </section>
 
       {/* =========================================================================
-          4. FEATURED COURSES SECTION
+          4. FEATURED COURSES SECTION (Clicking on course does NOTHING as requested)
          ========================================================================= */}
-      <section id="courses" className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-white">
+      <section id="courses" className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-white dark:bg-[#0a0d16] transition-colors duration-300">
         <div className="max-w-[1440px] mx-auto flex flex-col gap-[32px]">
-          {/* Header */}
+          {/* Header (Top-down & Bottom-up) */}
           <div className="flex flex-col gap-[12px]">
-            <p className="font-bold text-[#4f46e5] text-[12px] tracking-wider uppercase">
+            <p
+              data-aos="fade-down"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[12px] tracking-wider uppercase"
+            >
               CURATED FOR YOUR NEXT CHAPTER
             </p>
-            <div className="flex flex-col gap-[8px]">
-              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a]">
+            <div data-aos="fade-up" className="flex flex-col gap-[8px]">
+              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a] dark:text-white transition-colors">
                 Small investment. Lasting impact.
               </h2>
-              <p className="text-[#475569] text-[16px]">
+              <p className="text-[#475569] dark:text-slate-300 text-[16px] transition-colors">
                 Go deeper with practical, beautifully structured courses.
               </p>
             </div>
           </div>
 
-          {/* 3 Course Cards Grid */}
+          {/* 3 Course Cards Grid (AOS: fade-up staggered, NO CLICK ACTION) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[24px]">
             {/* COURSE CARD 1: Product Design */}
             <div
-              onClick={() => setSelectedCourse("Product Design, from insight to impact")}
-              className="bg-white border border-[#e2e8f0] rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col cursor-pointer group"
+              data-aos="fade-up"
+              data-aos-delay="100"
+              className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none"
             >
               {/* Thumbnail banner */}
               <div className="bg-gradient-to-r from-[#312e81] to-[#6d28d9] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
@@ -565,7 +653,7 @@ export default function App() {
                     <p>Design with</p>
                     <p>intent.</p>
                   </div>
-                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm group-hover:scale-105 transition-transform">
+                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
                     <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
                   </div>
                 </div>
@@ -575,33 +663,33 @@ export default function App() {
               <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
                 <div className="flex flex-col gap-[12px]">
                   <div className="flex items-center justify-between">
-                    <span className="bg-[#f1f5f9] text-[#475569] font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
+                    <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
                       Product design
                     </span>
-                    <span className="text-[#b45309] text-[12px] font-normal">
+                    <span className="text-[#b45309] dark:text-amber-500 text-[12px] font-normal">
                       ★ 4.9 (128)
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3] group-hover:text-[#4f46e5] transition-colors">
+                  <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                     Product Design, from insight to impact
                   </h3>
 
-                  <p className="text-[#475569] text-[14px]">
+                  <p className="text-[#475569] dark:text-slate-400 text-[14px]">
                     Maya Chen · 12 lessons · 6 hours
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-[16px] pt-2">
-                  <div className="h-px bg-[#e2e8f0]" />
+                  <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
                   <div className="flex items-center justify-between">
-                    <div className="bg-[#f1f5f9] flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                      <img src="/assets/lock-1.svg" alt="" className="size-[14px]" />
-                      <span className="font-bold text-[#475569] text-[12px]">
+                    <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
+                      <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
+                      <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
                         Locked
                       </span>
                     </div>
-                    <span className="font-bold text-[#4f46e5] text-[14px] group-hover:translate-x-0.5 transition-transform">
+                    <span className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[14px]">
                       $200 →
                     </span>
                   </div>
@@ -611,8 +699,9 @@ export default function App() {
 
             {/* COURSE CARD 2: Systems Thinking */}
             <div
-              onClick={() => setSelectedCourse("Systems thinking for product teams")}
-              className="bg-white border border-[#e2e8f0] rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col cursor-pointer group"
+              data-aos="fade-up"
+              data-aos-delay="200"
+              className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none"
             >
               {/* Thumbnail banner */}
               <div className="bg-[#0f766e] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
@@ -630,7 +719,7 @@ export default function App() {
                     <p>Think in</p>
                     <p>systems.</p>
                   </div>
-                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm group-hover:scale-105 transition-transform">
+                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
                     <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
                   </div>
                 </div>
@@ -640,33 +729,33 @@ export default function App() {
               <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
                 <div className="flex flex-col gap-[12px]">
                   <div className="flex items-center justify-between">
-                    <span className="bg-[#f1f5f9] text-[#475569] font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
+                    <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
                       Product strategy
                     </span>
-                    <span className="text-[#b45309] text-[12px] font-normal">
+                    <span className="text-[#b45309] dark:text-amber-500 text-[12px] font-normal">
                       ★ 4.9 (128)
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3] group-hover:text-[#4f46e5] transition-colors">
+                  <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                     Systems thinking for product teams
                   </h3>
 
-                  <p className="text-[#475569] text-[14px]">
+                  <p className="text-[#475569] dark:text-slate-400 text-[14px]">
                     Jordan Lee · 12 lessons · 6 hours
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-[16px] pt-2">
-                  <div className="h-px bg-[#e2e8f0]" />
+                  <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
                   <div className="flex items-center justify-between">
-                    <div className="bg-[#f1f5f9] flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                      <img src="/assets/lock-1.svg" alt="" className="size-[14px]" />
-                      <span className="font-bold text-[#475569] text-[12px]">
+                    <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
+                      <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
+                      <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
                         Locked
                       </span>
                     </div>
-                    <span className="font-bold text-[#4f46e5] text-[14px] group-hover:translate-x-0.5 transition-transform">
+                    <span className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[14px]">
                       $200 →
                     </span>
                   </div>
@@ -676,8 +765,9 @@ export default function App() {
 
             {/* COURSE CARD 3: Brand Design */}
             <div
-              onClick={() => setSelectedCourse("Build a brand people believe in")}
-              className="bg-white border border-[#e2e8f0] rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] hover:shadow-xl hover:-translate-y-1 transition-all duration-200 flex flex-col cursor-pointer group"
+              data-aos="fade-up"
+              data-aos-delay="300"
+              className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none"
             >
               {/* Thumbnail banner */}
               <div className="bg-gradient-to-r from-[#7c2d12] to-[#b45309] h-[176px] p-[24px] relative overflow-hidden flex flex-col justify-between text-white">
@@ -695,7 +785,7 @@ export default function App() {
                     <p>Make it</p>
                     <p>meaningful.</p>
                   </div>
-                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm group-hover:scale-105 transition-transform">
+                  <div className="size-[48px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm">
                     <img src="/assets/lock.svg" alt="Locked" className="size-[26px]" />
                   </div>
                 </div>
@@ -705,33 +795,33 @@ export default function App() {
               <div className="p-[24px] flex flex-col gap-[16px] flex-1 justify-between">
                 <div className="flex flex-col gap-[12px]">
                   <div className="flex items-center justify-between">
-                    <span className="bg-[#f1f5f9] text-[#475569] font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
+                    <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-[10px] py-[5px] rounded-[100px]">
                       Brand design
                     </span>
-                    <span className="text-[#b45309] text-[12px] font-normal">
+                    <span className="text-[#b45309] dark:text-amber-500 text-[12px] font-normal">
                       ★ 4.9 (128)
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3] group-hover:text-[#4f46e5] transition-colors">
+                  <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                     Build a brand people believe in
                   </h3>
 
-                  <p className="text-[#475569] text-[14px]">
+                  <p className="text-[#475569] dark:text-slate-400 text-[14px]">
                     Jordan Lee · 12 lessons · 6 hours
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-[16px] pt-2">
-                  <div className="h-px bg-[#e2e8f0]" />
+                  <div className="h-px bg-[#e2e8f0] dark:bg-slate-800" />
                   <div className="flex items-center justify-between">
-                    <div className="bg-[#f1f5f9] flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
-                      <img src="/assets/lock-1.svg" alt="" className="size-[14px]" />
-                      <span className="font-bold text-[#475569] text-[12px]">
+                    <div className="bg-[#f1f5f9] dark:bg-slate-800 flex items-center gap-[6px] px-[10px] py-[5px] rounded-[100px]">
+                      <img src="/assets/lock-1.svg" alt="" className="size-[14px] dark:brightness-125" />
+                      <span className="font-bold text-[#475569] dark:text-slate-300 text-[12px]">
                         Locked
                       </span>
                     </div>
-                    <span className="font-bold text-[#4f46e5] text-[14px] group-hover:translate-x-0.5 transition-transform">
+                    <span className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[14px]">
                       $200 →
                     </span>
                   </div>
@@ -740,11 +830,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Explore all courses text button */}
-          <div className="pt-2">
+          {/* Explore all courses text button (AOS: fade-up) */}
+          <div data-aos="fade-up" className="pt-2">
             <a
               href="#courses"
-              className="font-bold text-[#4f46e5] hover:text-[#4338ca] text-[14px] inline-flex items-center gap-1 group"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] hover:text-[#4338ca] dark:hover:text-[#a5b4fc] text-[14px] inline-flex items-center gap-1 group"
             >
               <span>Explore all courses</span>
               <span className="group-hover:translate-x-1 transition-transform">→</span>
@@ -754,95 +844,114 @@ export default function App() {
       </section>
 
       {/* =========================================================================
-          5. HOW LEARNING WORKS (A CLEAR PATH FORWARD)
+          5. HOW LEARNING WORKS (Top-down header & Bottom-up step cards)
          ========================================================================= */}
-      <section id="how-it-works" className="bg-[#f8fafc] py-[64px] px-6 sm:px-10 lg:px-[80px] border-y border-[#e2e8f0]">
+      <section id="how-it-works" className="bg-[#f8fafc] dark:bg-[#0c101c] py-[64px] px-6 sm:px-10 lg:px-[80px] border-y border-[#e2e8f0] dark:border-slate-800 transition-colors duration-300">
         <div className="max-w-[1440px] mx-auto flex flex-col gap-[40px]">
           {/* Section heading */}
           <div className="flex flex-col gap-[12px]">
-            <p className="font-bold text-[#4f46e5] text-[12px] tracking-wider uppercase">
+            <p
+              data-aos="fade-down"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[12px] tracking-wider uppercase"
+            >
               A CLEAR PATH FORWARD
             </p>
-            <div className="flex flex-col gap-[8px]">
-              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a]">
+            <div data-aos="fade-up" className="flex flex-col gap-[8px]">
+              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a] dark:text-white transition-colors">
                 From curious to capable.
               </h2>
-              <p className="text-[#475569] text-[16px]">
+              <p className="text-[#475569] dark:text-slate-300 text-[16px] transition-colors">
                 Four simple steps. A new set of possibilities.
               </p>
             </div>
           </div>
 
-          {/* 4 Steps Grid */}
+          {/* 4 Steps Grid (AOS: fade-up staggered) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[32px]">
             {/* Step 1 */}
-            <div className="flex flex-col gap-[16px] bg-white lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="100"
+              className="flex flex-col gap-[16px] bg-white dark:bg-slate-900/60 lg:bg-transparent dark:lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 dark:border-slate-800 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform"
+            >
               <div className="flex items-center justify-between">
-                <div className="size-[28px] text-[#0f172a] flex items-center justify-center">
-                  <img src="/assets/compass.svg" alt="" className="size-[28px]" />
+                <div className="size-[28px] text-[#0f172a] dark:text-white flex items-center justify-center">
+                  <img src="/assets/compass.svg" alt="" className="size-[28px] dark:brightness-125" />
                 </div>
-                <span className="font-normal text-[#64748b] text-[14px] font-mono">
+                <span className="font-normal text-[#64748b] dark:text-slate-400 text-[14px] font-mono">
                   01
                 </span>
               </div>
-              <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3]">
+              <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                 Find your course
               </h3>
-              <p className="text-[#475569] text-[16px] leading-[1.5]">
+              <p className="text-[#475569] dark:text-slate-400 text-[16px] leading-[1.5] transition-colors">
                 Choose the skill that moves you closer to your goals.
               </p>
             </div>
 
             {/* Step 2 */}
-            <div className="flex flex-col gap-[16px] bg-white lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="200"
+              className="flex flex-col gap-[16px] bg-white dark:bg-slate-900/60 lg:bg-transparent dark:lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 dark:border-slate-800 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform"
+            >
               <div className="flex items-center justify-between">
-                <div className="size-[28px] text-[#0f172a] flex items-center justify-center">
-                  <img src="/assets/credit-card.svg" alt="" className="size-[28px]" />
+                <div className="size-[28px] text-[#0f172a] dark:text-white flex items-center justify-center">
+                  <img src="/assets/credit-card.svg" alt="" className="size-[28px] dark:brightness-125" />
                 </div>
-                <span className="font-normal text-[#64748b] text-[14px] font-mono">
+                <span className="font-normal text-[#64748b] dark:text-slate-400 text-[14px] font-mono">
                   02
                 </span>
               </div>
-              <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3]">
+              <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                 Make it yours
               </h3>
-              <p className="text-[#475569] text-[16px] leading-[1.5]">
+              <p className="text-[#475569] dark:text-slate-400 text-[16px] leading-[1.5] transition-colors">
                 One secure payment. Lifetime access. No subscription.
               </p>
             </div>
 
             {/* Step 3 */}
-            <div className="flex flex-col gap-[16px] bg-white lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="300"
+              className="flex flex-col gap-[16px] bg-white dark:bg-slate-900/60 lg:bg-transparent dark:lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 dark:border-slate-800 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform"
+            >
               <div className="flex items-center justify-between">
-                <div className="size-[28px] text-[#0f172a] flex items-center justify-center">
-                  <img src="/assets/circle-play-1.svg" alt="" className="size-[28px]" />
+                <div className="size-[28px] text-[#0f172a] dark:text-white flex items-center justify-center">
+                  <img src="/assets/circle-play-1.svg" alt="" className="size-[28px] dark:brightness-125" />
                 </div>
-                <span className="font-normal text-[#64748b] text-[14px] font-mono">
+                <span className="font-normal text-[#64748b] dark:text-slate-400 text-[14px] font-mono">
                   03
                 </span>
               </div>
-              <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3]">
+              <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                 Learn by doing
               </h3>
-              <p className="text-[#475569] text-[16px] leading-[1.5]">
+              <p className="text-[#475569] dark:text-slate-400 text-[16px] leading-[1.5] transition-colors">
                 Watch, practice, and build momentum one lesson at a time.
               </p>
             </div>
 
             {/* Step 4 */}
-            <div className="flex flex-col gap-[16px] bg-white lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="400"
+              className="flex flex-col gap-[16px] bg-white dark:bg-slate-900/60 lg:bg-transparent dark:lg:bg-transparent p-6 lg:p-0 rounded-xl border border-slate-200/80 dark:border-slate-800 lg:border-none shadow-sm lg:shadow-none hover:-translate-y-1 transition-transform"
+            >
               <div className="flex items-center justify-between">
-                <div className="size-[28px] text-[#0f172a] flex items-center justify-center">
-                  <img src="/assets/award.svg" alt="" className="size-[28px]" />
+                <div className="size-[28px] text-[#0f172a] dark:text-white flex items-center justify-center">
+                  <img src="/assets/award.svg" alt="" className="size-[28px] dark:brightness-125" />
                 </div>
-                <span className="font-normal text-[#64748b] text-[14px] font-mono">
+                <span className="font-normal text-[#64748b] dark:text-slate-400 text-[14px] font-mono">
                   04
                 </span>
               </div>
-              <h3 className="font-bold text-[#0f172a] text-[20px] leading-[1.3]">
+              <h3 className="font-bold text-[#0f172a] dark:text-white text-[20px] leading-[1.3] transition-colors">
                 Share your growth
               </h3>
-              <p className="text-[#475569] text-[16px] leading-[1.5]">
+              <p className="text-[#475569] dark:text-slate-400 text-[16px] leading-[1.5] transition-colors">
                 Finish your course and earn a verifiable certificate.
               </p>
             </div>
@@ -851,80 +960,98 @@ export default function App() {
       </section>
 
       {/* =========================================================================
-          6. LEARNER TESTIMONIALS (REAL LEARNERS. REAL MOMENTUM.)
+          6. LEARNER TESTIMONIALS (Top-down title & Bottom-up cards)
          ========================================================================= */}
-      <section className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-white">
+      <section className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-white dark:bg-[#0a0d16] transition-colors duration-300">
         <div className="max-w-[1440px] mx-auto flex flex-col gap-[40px]">
           {/* Header */}
           <div className="flex flex-col gap-[12px]">
-            <p className="font-bold text-[#4f46e5] text-[12px] tracking-wider uppercase">
+            <p
+              data-aos="fade-down"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[12px] tracking-wider uppercase"
+            >
               REAL LEARNERS. REAL MOMENTUM.
             </p>
-            <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a]">
+            <h2
+              data-aos="fade-up"
+              className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a] dark:text-white transition-colors"
+            >
               Good things happen when you keep learning.
             </h2>
           </div>
 
-          {/* Testimonials 3 Columns */}
+          {/* Testimonials 3 Columns (AOS: fade-up staggered) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-[24px]">
             {/* Testimonial 1 */}
-            <div className="border border-[#e2e8f0] p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="100"
+              className="border border-[#e2e8f0] dark:border-slate-800 p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white dark:bg-slate-900"
+            >
               <div className="flex flex-col gap-[20px]">
-                <p className="text-[#b45309] text-[18px] tracking-[2px] font-bold select-none">
+                <p className="text-[#b45309] dark:text-amber-500 text-[18px] tracking-[2px] font-bold select-none">
                   ★★★★★
                 </p>
-                <p className="font-medium text-[#0f172a] text-[18px] leading-[1.5]">
+                <p className="font-medium text-[#0f172a] dark:text-slate-200 text-[18px] leading-[1.5] transition-colors">
                   “This is the first course that made research feel actionable. I used the framework with my team the very next day.”
                 </p>
               </div>
 
-              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100">
-                <p className="font-bold text-[#0f172a] text-[14px]">
+              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100 dark:border-slate-800 transition-colors">
+                <p className="font-bold text-[#0f172a] dark:text-white text-[14px]">
                   Sam Rivera
                 </p>
-                <p className="text-[#475569] text-[12px]">
+                <p className="text-[#475569] dark:text-slate-400 text-[12px]">
                   Product designer at Webflow
                 </p>
               </div>
             </div>
 
             {/* Testimonial 2 */}
-            <div className="border border-[#e2e8f0] p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="200"
+              className="border border-[#e2e8f0] dark:border-slate-800 p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white dark:bg-slate-900"
+            >
               <div className="flex flex-col gap-[20px]">
-                <p className="text-[#b45309] text-[18px] tracking-[2px] font-bold select-none">
+                <p className="text-[#b45309] dark:text-amber-500 text-[18px] tracking-[2px] font-bold select-none">
                   ★★★★★
                 </p>
-                <p className="font-medium text-[#0f172a] text-[18px] leading-[1.5]">
+                <p className="font-medium text-[#0f172a] dark:text-slate-200 text-[18px] leading-[1.5] transition-colors">
                   “Clear, considered, and genuinely useful. I went from second-guessing my process to leading our next discovery sprint.”
                 </p>
               </div>
 
-              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100">
-                <p className="font-bold text-[#0f172a] text-[14px]">
+              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100 dark:border-slate-800 transition-colors">
+                <p className="font-bold text-[#0f172a] dark:text-white text-[14px]">
                   Priya Patel
                 </p>
-                <p className="text-[#475569] text-[12px]">
+                <p className="text-[#475569] dark:text-slate-400 text-[12px]">
                   Senior designer at Linear
                 </p>
               </div>
             </div>
 
             {/* Testimonial 3 */}
-            <div className="border border-[#e2e8f0] p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white">
+            <div
+              data-aos="fade-up"
+              data-aos-delay="300"
+              className="border border-[#e2e8f0] dark:border-slate-800 p-[24px] rounded-[12px] flex flex-col justify-between gap-[24px] hover:shadow-lg transition-shadow bg-white dark:bg-slate-900"
+            >
               <div className="flex flex-col gap-[20px]">
-                <p className="text-[#b45309] text-[18px] tracking-[2px] font-bold select-none">
+                <p className="text-[#b45309] dark:text-amber-500 text-[18px] tracking-[2px] font-bold select-none">
                   ★★★★★
                 </p>
-                <p className="font-medium text-[#0f172a] text-[18px] leading-[1.5]">
+                <p className="font-medium text-[#0f172a] dark:text-slate-200 text-[18px] leading-[1.5] transition-colors">
                   “The pace, the examples, the little details. It feels like learning from a brilliant colleague, not watching a lecture.”
                 </p>
               </div>
 
-              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100">
-                <p className="font-bold text-[#0f172a] text-[14px]">
+              <div className="flex flex-col gap-[4px] pt-4 border-t border-slate-100 dark:border-slate-800 transition-colors">
+                <p className="font-bold text-[#0f172a] dark:text-white text-[14px]">
                   Daniel Kim
                 </p>
-                <p className="text-[#475569] text-[12px]">
+                <p className="text-[#475569] dark:text-slate-400 text-[12px]">
                   Founder at Fieldwork
                 </p>
               </div>
@@ -934,53 +1061,60 @@ export default function App() {
       </section>
 
       {/* =========================================================================
-          7. FREQUENTLY ASKED QUESTIONS (FAQ)
+          7. FREQUENTLY ASKED QUESTIONS (FAQ) (Top-down & Bottom-up)
          ========================================================================= */}
-      <section className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-slate-50/50 border-t border-[#e2e8f0]">
+      <section className="py-[64px] px-6 sm:px-10 lg:px-[80px] bg-slate-50/50 dark:bg-[#0c101c]/50 border-t border-[#e2e8f0] dark:border-slate-800 transition-colors duration-300">
         <div className="max-w-[1440px] mx-auto flex flex-col lg:flex-row gap-12 lg:gap-[80px]">
-          {/* FAQ Intro Left Column */}
-          <div className="w-full lg:w-[400px] flex flex-col gap-[16px] shrink-0">
+          {/* FAQ Intro Left Column (AOS: fade-down) */}
+          <div
+            data-aos="fade-down"
+            className="w-full lg:w-[400px] flex flex-col gap-[16px] shrink-0"
+          >
             <div className="flex flex-col gap-[12px]">
-              <p className="font-bold text-[#4f46e5] text-[12px] tracking-wider uppercase">
+              <p className="font-bold text-[#4f46e5] dark:text-[#818cf8] text-[12px] tracking-wider uppercase">
                 A FEW THINGS TO KNOW
               </p>
-              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a]">
+              <h2 className="font-extrabold text-[32px] sm:text-[40px] leading-[1.2] tracking-[-1.2px] text-[#0f172a] dark:text-white transition-colors">
                 Learning, without the guesswork.
               </h2>
             </div>
-            <p className="text-[#475569] text-[16px] leading-[1.5]">
+            <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] transition-colors">
               Still curious? We’re here to help.
             </p>
             <a
               href="mailto:hello@lmsportal.com"
-              className="font-bold text-[#4f46e5] hover:text-[#4338ca] text-[14px] inline-flex items-center gap-1 group"
+              className="font-bold text-[#4f46e5] dark:text-[#818cf8] hover:text-[#4338ca] dark:hover:text-[#a5b4fc] text-[14px] inline-flex items-center gap-1 group"
             >
               <span>hello@lmsportal.com</span>
               <span className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform">↗</span>
             </a>
           </div>
 
-          {/* FAQ Accordion Items */}
-          <div className="flex-1 flex flex-col divide-y divide-[#e2e8f0]">
+          {/* FAQ Accordion Items (AOS: fade-up) */}
+          <div
+            data-aos="fade-up"
+            data-aos-delay="150"
+            className="flex-1 flex flex-col divide-y divide-[#e2e8f0] dark:divide-slate-800 transition-colors"
+          >
             {/* FAQ 1 */}
             <div className="py-[24px]">
               <button
                 onClick={() => toggleFaq(0)}
                 className="w-full flex items-start justify-between gap-[16px] text-left group focus:outline-none"
               >
-                <span className="font-bold text-[#0f172a] text-[16px] leading-[1.5] group-hover:text-[#4f46e5] transition-colors">
+                <span className="font-bold text-[#0f172a] dark:text-white text-[16px] leading-[1.5] group-hover:text-[#4f46e5] dark:group-hover:text-[#818cf8] transition-colors">
                   How long do I have access?
                 </span>
                 <span className="shrink-0 pt-0.5">
                   {openFaq[0] ? (
-                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px]" />
+                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px] dark:brightness-125" />
                   ) : (
-                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px]" />
+                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px] dark:brightness-125" />
                   )}
                 </span>
               </button>
               {openFaq[0] && (
-                <p className="text-[#475569] text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
+                <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
                   Your course is yours for life, including future updates. Revisit lessons whenever you need a little inspiration.
                 </p>
               )}
@@ -992,19 +1126,19 @@ export default function App() {
                 onClick={() => toggleFaq(1)}
                 className="w-full flex items-start justify-between gap-[16px] text-left group focus:outline-none"
               >
-                <span className="font-bold text-[#0f172a] text-[16px] leading-[1.5] group-hover:text-[#4f46e5] transition-colors">
+                <span className="font-bold text-[#0f172a] dark:text-white text-[16px] leading-[1.5] group-hover:text-[#4f46e5] dark:group-hover:text-[#818cf8] transition-colors">
                   Do I need any previous experience?
                 </span>
                 <span className="shrink-0 pt-0.5">
                   {openFaq[1] ? (
-                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px]" />
+                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px] dark:brightness-125" />
                   ) : (
-                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px]" />
+                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px] dark:brightness-125" />
                   )}
                 </span>
               </button>
               {openFaq[1] && (
-                <p className="text-[#475569] text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
+                <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
                   Each course clearly lists its level. Product Design is beginner-friendly; bring curiosity and a willingness to practice.
                 </p>
               )}
@@ -1016,19 +1150,19 @@ export default function App() {
                 onClick={() => toggleFaq(2)}
                 className="w-full flex items-start justify-between gap-[16px] text-left group focus:outline-none"
               >
-                <span className="font-bold text-[#0f172a] text-[16px] leading-[1.5] group-hover:text-[#4f46e5] transition-colors">
+                <span className="font-bold text-[#0f172a] dark:text-white text-[16px] leading-[1.5] group-hover:text-[#4f46e5] dark:group-hover:text-[#818cf8] transition-colors">
                   Will I get a certificate?
                 </span>
                 <span className="shrink-0 pt-0.5">
                   {openFaq[2] ? (
-                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px]" />
+                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px] dark:brightness-125" />
                   ) : (
-                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px]" />
+                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px] dark:brightness-125" />
                   )}
                 </span>
               </button>
               {openFaq[2] && (
-                <p className="text-[#475569] text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
+                <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
                   Yes, upon completing all lessons and assignments, you will earn an authentic, verifiable certificate you can add to LinkedIn, share with managers, or showcase in your portfolio.
                 </p>
               )}
@@ -1040,19 +1174,19 @@ export default function App() {
                 onClick={() => toggleFaq(3)}
                 className="w-full flex items-start justify-between gap-[16px] text-left group focus:outline-none"
               >
-                <span className="font-bold text-[#0f172a] text-[16px] leading-[1.5] group-hover:text-[#4f46e5] transition-colors">
+                <span className="font-bold text-[#0f172a] dark:text-white text-[16px] leading-[1.5] group-hover:text-[#4f46e5] dark:group-hover:text-[#818cf8] transition-colors">
                   What if the course isn’t right for me?
                 </span>
                 <span className="shrink-0 pt-0.5">
                   {openFaq[3] ? (
-                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px]" />
+                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px] dark:brightness-125" />
                   ) : (
-                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px]" />
+                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px] dark:brightness-125" />
                   )}
                 </span>
               </button>
               {openFaq[3] && (
-                <p className="text-[#475569] text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
+                <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
                   We stand by the quality of our content. If you find the course doesn't meet your expectations, we offer a hassle-free 14-day refund policy.
                 </p>
               )}
@@ -1064,19 +1198,19 @@ export default function App() {
                 onClick={() => toggleFaq(4)}
                 className="w-full flex items-start justify-between gap-[16px] text-left group focus:outline-none"
               >
-                <span className="font-bold text-[#0f172a] text-[16px] leading-[1.5] group-hover:text-[#4f46e5] transition-colors">
+                <span className="font-bold text-[#0f172a] dark:text-white text-[16px] leading-[1.5] group-hover:text-[#4f46e5] dark:group-hover:text-[#818cf8] transition-colors">
                   Can I learn on my phone?
                 </span>
                 <span className="shrink-0 pt-0.5">
                   {openFaq[4] ? (
-                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px]" />
+                    <img src="/assets/minus.svg" alt="Collapse" className="size-[20px] dark:brightness-125" />
                   ) : (
-                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px]" />
+                    <img src="/assets/plus.svg" alt="Expand" className="size-[20px] dark:brightness-125" />
                   )}
                 </span>
               </button>
               {openFaq[4] && (
-                <p className="text-[#475569] text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
+                <p className="text-[#475569] dark:text-slate-300 text-[16px] leading-[1.5] pt-[12px] animate-fadeIn">
                   Yes! The platform is designed from the ground up to be responsive on phones, tablets, and desktops so you can study comfortably wherever you are.
                 </p>
               )}
@@ -1086,37 +1220,53 @@ export default function App() {
       </section>
 
       {/* =========================================================================
-          8. CALL TO ACTION BANNER (START LEARNING CALLOUT)
+          8. CALL TO ACTION BANNER (AOS: fade-up)
          ========================================================================= */}
-      <section className="bg-[#0f172a] py-[64px] px-6 sm:px-12 md:px-[160px] text-center text-white relative overflow-hidden">
+      <section
+        data-aos="fade-up"
+        className="bg-[#0f172a] dark:bg-[#070912] py-[64px] px-6 sm:px-12 md:px-[160px] text-center text-white relative overflow-hidden transition-colors duration-300"
+      >
         {/* Subtle decorative glow */}
         <div className="absolute left-1/2 -top-40 -translate-x-1/2 size-[500px] bg-[#4f46e5]/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="max-w-[900px] mx-auto flex flex-col items-center gap-[24px] relative z-10">
-          <h2 className="font-extrabold text-[36px] sm:text-[44px] lg:text-[52px] leading-[1.15] tracking-[-1.5px] text-white">
+          <h2
+            data-aos="fade-down"
+            data-aos-delay="100"
+            className="font-extrabold text-[36px] sm:text-[44px] lg:text-[52px] leading-[1.15] tracking-[-1.5px] text-white"
+          >
             Your next breakthrough starts with a little curiosity.
           </h2>
-          <p className="text-[#cbd5e1] text-[16px] leading-[1.5] max-w-[600px]">
+          <p
+            data-aos="fade-up"
+            data-aos-delay="150"
+            className="text-[#cbd5e1] dark:text-slate-300 text-[16px] leading-[1.5] max-w-[600px]"
+          >
             Make room for the work you want to do. We’ll help you get there.
           </p>
-          <a
-            href="#courses"
-            className="bg-[#4f46e5] hover:bg-[#4338ca] text-white px-[20px] py-[12px] min-h-[48px] rounded-[8px] font-bold text-[14px] inline-flex items-center justify-center gap-[8px] transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98] mt-2 group"
-          >
-            <img
-              src="/assets/arrow-right.svg"
-              alt=""
-              className="size-[18px] group-hover:translate-x-1 transition-transform"
-            />
-            <span>Find your next course</span>
-          </a>
+          <div data-aos="fade-up" data-aos-delay="200">
+            <a
+              href="#courses"
+              className="bg-[#4f46e5] hover:bg-[#4338ca] text-white px-[20px] py-[12px] min-h-[48px] rounded-[8px] font-bold text-[14px] inline-flex items-center justify-center gap-[8px] transition-all shadow-lg hover:shadow-indigo-500/25 active:scale-[0.98] mt-2 group"
+            >
+              <img
+                src="/assets/arrow-right.svg"
+                alt=""
+                className="size-[18px] group-hover:translate-x-1 transition-transform"
+              />
+              <span>Find your next course</span>
+            </a>
+          </div>
         </div>
       </section>
 
       {/* =========================================================================
-          9. FOOTER
+          9. FOOTER (AOS: fade-up)
          ========================================================================= */}
-      <footer className="bg-white py-[48px] px-6 sm:px-10 lg:px-[80px] border-t border-[#e2e8f0]">
+      <footer
+        data-aos="fade-up"
+        className="bg-white dark:bg-[#0a0d16] py-[48px] px-6 sm:px-10 lg:px-[80px] border-t border-[#e2e8f0] dark:border-slate-800 transition-colors duration-300"
+      >
         <div className="max-w-[1440px] mx-auto flex flex-col gap-[40px]">
           {/* Main Footer Links */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-[48px]">
@@ -1126,142 +1276,72 @@ export default function App() {
                 <div className="bg-[#4f46e5] rounded-[9px] size-[32px] flex items-center justify-center shrink-0">
                   <img src="/assets/layers-2.svg" alt="LMS Portal" className="size-[20px]" />
                 </div>
-                <span className="font-extrabold text-[19px] tracking-[-0.5px] text-[#0f172a]">
+                <span className="font-extrabold text-[19px] tracking-[-0.5px] text-[#0f172a] dark:text-white transition-colors">
                   LMS Portal
                 </span>
               </div>
-              <p className="text-[#475569] text-[16px] leading-[1.5] max-w-[340px]">
+              <p className="text-[#475569] dark:text-slate-400 text-[16px] leading-[1.5] max-w-[340px] transition-colors">
                 Learn with intention. Build what comes next.
               </p>
             </div>
 
             {/* Column 1: Learn */}
             <div className="flex flex-col gap-[16px] text-[14px] leading-[1.5]">
-              <p className="font-bold text-[#0f172a]">
+              <p className="font-bold text-[#0f172a] dark:text-white">
                 Learn
               </p>
-              <a href="#courses" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#courses" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Explore courses
               </a>
-              <a href="#courses" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#courses" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 My learning
               </a>
-              <a href="#courses" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#courses" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Certificates
               </a>
             </div>
 
             {/* Column 2: Company */}
             <div className="flex flex-col gap-[16px] text-[14px] leading-[1.5]">
-              <p className="font-bold text-[#0f172a]">
+              <p className="font-bold text-[#0f172a] dark:text-white">
                 Company
               </p>
-              <a href="#our-story" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#our-story" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Our story
               </a>
-              <a href="#courses" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#courses" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Become an instructor
               </a>
-              <a href="mailto:hello@lmsportal.com" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="mailto:hello@lmsportal.com" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Contact us
               </a>
             </div>
 
             {/* Column 3: Support */}
             <div className="flex flex-col gap-[16px] text-[14px] leading-[1.5]">
-              <p className="font-bold text-[#0f172a]">
+              <p className="font-bold text-[#0f172a] dark:text-white">
                 Support
               </p>
-              <a href="#faq" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Help center
               </a>
-              <a href="#" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Accessibility
               </a>
-              <a href="#" className="text-[#475569] hover:text-[#0f172a] transition-colors">
+              <a href="#" className="text-[#475569] dark:text-slate-400 hover:text-[#0f172a] dark:hover:text-white transition-colors">
                 Refund policy
               </a>
             </div>
           </div>
 
           {/* Legal / Copyright Bottom Bar */}
-          <div className="border-t border-[#e2e8f0] pt-[24px]">
-            <p className="text-[#64748b] text-[12px] leading-[1.5]">
+          <div className="border-t border-[#e2e8f0] dark:border-slate-800 pt-[24px] transition-colors">
+            <p className="text-[#64748b] dark:text-slate-500 text-[12px] leading-[1.5]">
               © 2026 LMS Portal. Keep growing. · Privacy policy · Terms of service
             </p>
           </div>
         </div>
       </footer>
-
-      {/* =========================================================================
-          10. COURSE PREVIEW / ENROLL MODAL DIALOG
-         ========================================================================= */}
-      {selectedCourse && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-6 relative">
-            <button
-              onClick={() => setSelectedCourse(null)}
-              className="absolute right-4 top-4 text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition"
-              aria-label="Close dialog"
-            >
-              <X className="size-5" />
-            </button>
-
-            <div className="flex items-center gap-3">
-              <div className="size-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#4f46e5]">
-                <Layers className="size-5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-[#4f46e5] uppercase tracking-wider">
-                  Course Enrollment
-                </span>
-                <h3 className="font-bold text-lg text-[#0f172a]">
-                  {selectedCourse}
-                </h3>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 rounded-xl p-4 flex flex-col gap-3 border border-slate-100 text-sm">
-              <div className="flex justify-between items-center text-slate-600">
-                <span>Access type</span>
-                <span className="font-semibold text-slate-800">Lifetime access</span>
-              </div>
-              <div className="flex justify-between items-center text-slate-600">
-                <span>Certificate</span>
-                <span className="font-semibold text-emerald-600 flex items-center gap-1">
-                  <BadgeCheck className="size-4" /> Included
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-slate-600">
-                <span>Price</span>
-                <span className="text-lg font-extrabold text-[#0f172a]">$200.00</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Start learning immediately. Includes all future updates, downloadable project files, and interactive exercises.
-            </p>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setSelectedCourse(null)}
-                className="flex-1 py-3 px-4 rounded-lg border border-slate-200 font-semibold text-sm text-slate-700 hover:bg-slate-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  alert(`Enrolled in "${selectedCourse}"! Welcome aboard.`);
-                  setSelectedCourse(null);
-                }}
-                className="flex-1 py-3 px-4 rounded-lg bg-[#4f46e5] hover:bg-[#4338ca] font-bold text-sm text-white shadow-md transition"
-              >
-                Unlock Course
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
