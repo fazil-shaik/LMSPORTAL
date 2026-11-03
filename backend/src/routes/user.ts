@@ -17,9 +17,7 @@ const deleteAccountSchema = z.object({
   password: z.string().min(1, 'Password confirmation is required to delete account'),
 });
 
-// ============================================================================
 // 1. GET /api/user/profile (FR-11: Profile: name, avatar optional, email)
-// ============================================================================
 router.get('/profile', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -47,9 +45,7 @@ router.get('/profile', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
 // 2. PUT /api/user/profile (FR-11: Update profile name and avatar)
-// ============================================================================
 router.put('/profile', authenticate, async (req: Request, res: Response) => {
   try {
     const validatedData = updateProfileSchema.safeParse(req.body);
@@ -108,9 +104,7 @@ router.put('/profile', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
 // 3. GET /api/user/export-data (FR-13: GDPR style data export)
-// ============================================================================
 router.get('/export-data', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -154,9 +148,7 @@ router.get('/export-data', authenticate, async (req: Request, res: Response) => 
   }
 });
 
-// ============================================================================
 // 4. DELETE /api/user/account (FR-13: Account deletion request)
-// ============================================================================
 router.delete('/account', authenticate, async (req: Request, res: Response) => {
   try {
     const validatedData = deleteAccountSchema.safeParse(req.body);

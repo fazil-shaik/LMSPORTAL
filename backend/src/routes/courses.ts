@@ -257,9 +257,7 @@ export function getUserCourseProgress(userId: string, course: CourseData, isEnro
   return defaultState;
 }
 
-// ============================================================================
 // 0. GET /api/courses/public (Open Catalog for Landing Page & Visitors)
-// ============================================================================
 router.get('/public', async (_req: Request, res: Response) => {
   try {
     const published = initialCourses.filter((c) => c.status !== 'draft');
@@ -272,9 +270,7 @@ router.get('/public', async (_req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
 // 1. GET /api/courses/dashboard (FR-14, FR-15, FR-16, FR-17, FR-18)
-// ============================================================================
 router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -437,9 +433,7 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
 // 2. POST /api/courses/:id/progress (Update lesson progress & Continue Learning shortcut)
-// ============================================================================
 router.post('/:id/progress', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -489,9 +483,7 @@ router.post('/:id/progress', authenticate, async (req: Request, res: Response) =
   }
 });
 
-// ============================================================================
 // 3. GET /api/courses (Public course list)
-// ============================================================================
 router.get('/', async (req: Request, res: Response) => {
   try {
     if (isDatabaseConnected && db) {
@@ -507,9 +499,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
 // 4. GET /api/courses/my-enrollments (Protected)
-// ============================================================================
 router.get('/my-enrollments', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -544,9 +534,7 @@ router.get('/my-enrollments', authenticate, async (req: Request, res: Response) 
   }
 });
 
-// ============================================================================
 // 5. POST /api/courses/:id/enroll (Protected - Enforces FR-7)
-// ============================================================================
 router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;

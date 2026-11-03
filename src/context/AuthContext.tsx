@@ -30,8 +30,8 @@ interface AuthContextType {
   googleSignIn: (profileData?: { email?: string; name?: string; avatarUrl?: string }) => Promise<{ success: boolean; message?: string }>;
   signOut: () => Promise<void>;
   checkAuth: () => Promise<void>;
-  verifyEmail: (token: string) => Promise<{ success: boolean; message?: string }>;
-  resendVerification: () => Promise<{ success: boolean; message?: string; verificationToken?: string }>;
+  verifyEmail: (token: string, targetEmail?: string) => Promise<{ success: boolean; message?: string }>;
+  resendVerification: (targetEmail?: string) => Promise<{ success: boolean; message?: string; verificationToken?: string; smtpConfigured?: boolean }>;
   forgotPassword: (email: string) => Promise<{ success: boolean; message?: string; resetToken?: string }>;
   resetPassword: (token: string, newPassword: string) => Promise<{ success: boolean; message?: string }>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; message?: string }>;
@@ -231,14 +231,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // FR-7: Verify Email
-  const verifyEmail = async (token: string) => {
+  // FR-7: Verify Email with 6-digit OTP
+  const verifyEmail = async (token: string, targetEmail?: string) => {
     try {
+      const emailToSend = targetEmail || user?.email;
       const res = await fetch('/api/auth/verify-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: token.trim(), email: emailToSend }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -249,21 +250,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return { success: true, message: data.message };
       } else {
-        return { success: false, message: data.message || 'Verification token invalid or expired' };
+        return { success: false, message: data.message || 'Verification code invalid or expired' };
       }
     } catch (e) {
       return { success: false, message: 'Verification request failed.' };
     }
   };
 
-  // FR-7: Resend verification email
-  const resendVerification = async () => {
+  // FR-7: Resend 6-digit verification OTP email
+  const resendVerification = async (targetEmail?: string) => {
     try {
+      const emailToSend = targetEmail || user?.email;
       const res = await fetch('/api/auth/resend-verification', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email: user?.email }),
+        body: JSON.stringify({ email: emailToSend }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -274,6 +276,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           success: true,
           message: data.message,
           verificationToken: data.verificationToken,
+          smtpConfigured: data.smtpConfigured,
         };
       } else {
         return { success: false, message: data.message || 'Could not resend email.' };

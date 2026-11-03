@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import jwt from 'jsonwebtoken';
+import { eq, and } from 'drizzle-orm';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
 import {
   hashPassword,
@@ -12,6 +13,11 @@ import {
   AuthUserPayload,
 } from '../middleware/auth.js';
 import { rateLimiter } from '../middleware/rateLimiter.js';
+import {
+  generateOtp,
+  sendVerificationOtpEmail,
+  isEmailConfigured,
+} from '../services/email.js';
 
 const router = Router();
 
@@ -146,9 +152,7 @@ const resetPasswordSchema = z.object({
     .regex(/\d/, 'Password must contain at least one number'),
 });
 
-// ============================================================================
 // 1. POST /api/auth/signup (FR-7: Sign up with email and password + email verification)
-// ============================================================================
 router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res: Response) => {
   try {
     const validatedData = signUpSchema.safeParse(req.body);
@@ -175,7 +179,8 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
 
     // Hash password with bcrypt (FR-12: passwords hashed with modern algorithm)
     const passwordHash = await hashPassword(password);
-    const verificationToken = 'vtok_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    // Generate a 6-digit numeric OTP for verification
+    const verificationOtp = generateOtp();
 
     let newUser: AuthUserPayload | null = null;
 
@@ -188,7 +193,7 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
             email: lowerEmail,
             passwordHash,
             emailVerified: false,
-            verificationToken,
+            verificationToken: verificationOtp,
             role: 'student',
           })
           .returning();
@@ -216,7 +221,7 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
         email: lowerEmail,
         passwordHash,
         emailVerified: false,
-        verificationToken,
+        verificationToken: verificationOtp,
         role: 'student',
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -231,18 +236,32 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
       };
     }
 
+    // Dispatch 6-digit verification OTP email to user's inbox
+    const emailResult = await sendVerificationOtpEmail(lowerEmail, name, verificationOtp);
+
     // Set secure HTTP-only session cookie (FR-12)
     const token = generateToken(newUser, false);
     setAuthCookie(res, token, false);
 
-    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${verificationToken}`;
+    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${verificationOtp}`;
+
+    let message = emailResult.success && emailResult.mode === 'smtp'
+      ? `Account created! A 6-digit verification OTP has been sent to your inbox (${lowerEmail}).`
+      : `Account created! Please verify with the 6-digit code sent to ${lowerEmail}.`;
+
+    if (!emailResult.success && emailResult.mode === 'smtp') {
+      const shortError = emailResult.error?.split('\n')[0] || 'SMTP Authentication Error';
+      message = `Account created! Note: SMTP delivery failed (${shortError}). Code: ${verificationOtp}`;
+    }
 
     return res.status(201).json({
       success: true,
-      message: 'Account created! Please verify your email before enrolling in courses.',
+      message,
       user: newUser,
-      verificationToken,
+      verificationToken: verificationOtp,
       verificationLink,
+      smtpConfigured: isEmailConfigured(),
+      emailDelivery: emailResult,
     });
   } catch (error: any) {
     console.error('Sign up error:', error);
@@ -253,9 +272,7 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
   }
 });
 
-// ============================================================================
 // 2. POST /api/auth/signin (FR-9: Sign in with email and password, secure session)
-// ============================================================================
 router.post('/signin', rateLimiter(15 * 60 * 1000, 15), async (req: Request, res: Response) => {
   try {
     const validatedData = signInSchema.safeParse(req.body);
@@ -332,9 +349,7 @@ router.post('/signin', rateLimiter(15 * 60 * 1000, 15), async (req: Request, res
   }
 });
 
-// ============================================================================
 // 3. POST /api/auth/google (FR-8: Social login with Google)
-// ============================================================================
 router.post('/google', rateLimiter(15 * 60 * 1000, 20), async (req: Request, res: Response) => {
   try {
     const validatedData = googleAuthSchema.safeParse(req.body);
@@ -431,9 +446,7 @@ router.post('/google', rateLimiter(15 * 60 * 1000, 20), async (req: Request, res
   }
 });
 
-// ============================================================================
 // 4. POST /api/auth/signout (FR-9: Sign out and clear HTTP-only cookie)
-// ============================================================================
 router.post('/signout', (req: Request, res: Response) => {
   clearAuthCookie(res);
   return res.status(200).json({
@@ -442,9 +455,7 @@ router.post('/signout', (req: Request, res: Response) => {
   });
 });
 
-// ============================================================================
 // 5. GET /api/auth/me (FR-11: Retrieve current authenticated student/admin)
-// ============================================================================
 router.get('/me', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
@@ -478,30 +489,66 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
-// 6. POST /api/auth/verify-email (FR-7: Email verification)
-// ============================================================================
+// 6. POST /api/auth/verify-email (FR-7: Email verification with 6-digit OTP)
 router.post('/verify-email', async (req: Request, res: Response) => {
   try {
-    const token = req.body.token || (req.query.token as string);
-    if (!token) {
-      return res.status(400).json({ success: false, message: 'Verification token is required.' });
+    const rawToken = req.body.token || req.body.otp || (req.query.token as string);
+    if (!rawToken) {
+      return res.status(400).json({ success: false, message: 'Verification code is required.' });
+    }
+    const token = rawToken.toString().trim();
+    let email = (req.body.email || req.query.email || '').toString().trim().toLowerCase();
+
+    // If not provided in body, check JWT cookie or Authorization header
+    if (!email) {
+      let authToken: string | undefined = req.cookies?.access_token;
+      if (!authToken && req.headers.authorization?.startsWith('Bearer ')) {
+        authToken = req.headers.authorization.split(' ')[1];
+      }
+      if (authToken) {
+        try {
+          const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_internwala_jwt_2026';
+          const decoded = jwt.verify(authToken, JWT_SECRET) as AuthUserPayload;
+          email = decoded.email?.toLowerCase().trim() || '';
+        } catch {
+          // Ignore token error, continue with code search
+        }
+      }
     }
 
     let updatedUser: any = null;
 
     if (isDatabaseConnected && db) {
-      const results = await db
-        .update(schema.users)
-        .set({ emailVerified: true, verificationToken: null, updatedAt: new Date() })
-        .where(eq(schema.users.verificationToken, token))
-        .returning();
+      // If email is known, match on both email and verificationToken; otherwise match token
+      if (email) {
+        const results = await db
+          .update(schema.users)
+          .set({ emailVerified: true, verificationToken: null, updatedAt: new Date() })
+          .where(and(eq(schema.users.email, email), eq(schema.users.verificationToken, token)))
+          .returning();
 
-      if (results && results.length > 0) {
-        updatedUser = results[0];
+        if (results && results.length > 0) {
+          updatedUser = results[0];
+        }
+      }
+
+      if (!updatedUser) {
+        const results = await db
+          .update(schema.users)
+          .set({ emailVerified: true, verificationToken: null, updatedAt: new Date() })
+          .where(eq(schema.users.verificationToken, token))
+          .returning();
+
+        if (results && results.length > 0) {
+          updatedUser = results[0];
+        }
       }
     } else {
-      const user = mockUsers.find((u) => u.verificationToken === token);
+      const user =
+        mockUsers.find(
+          (u) => (email ? u.email.toLowerCase() === email : true) && u.verificationToken === token
+        ) || mockUsers.find((u) => u.verificationToken === token);
+
       if (user) {
         user.emailVerified = true;
         user.verificationToken = undefined;
@@ -513,7 +560,7 @@ router.post('/verify-email', async (req: Request, res: Response) => {
     if (!updatedUser) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired verification token.',
+        message: 'Invalid or expired 6-digit verification code. Please check your email or request a new one.',
       });
     }
 
@@ -524,6 +571,7 @@ router.post('/verify-email', async (req: Request, res: Response) => {
       email: updatedUser.email,
       role: updatedUser.role,
       emailVerified: true,
+      avatarUrl: updatedUser.avatarUrl,
     };
     const newToken = generateToken(authUser, false);
     setAuthCookie(res, newToken, false);
@@ -539,37 +587,88 @@ router.post('/verify-email', async (req: Request, res: Response) => {
   }
 });
 
-// ============================================================================
-// 7. POST /api/auth/resend-verification (FR-7: Resend verification email)
-// ============================================================================
-router.post('/resend-verification', authenticate, async (req: Request, res: Response) => {
+// 7. POST /api/auth/resend-verification (FR-7: Resend 6-digit OTP verification email)
+router.post('/resend-verification', async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.id;
-    const freshToken = 'vtok_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    let targetEmail: string | undefined = req.body.email?.toString().trim().toLowerCase();
+    let targetUserId: string | undefined;
 
-    let userEmail = req.user!.email;
+    // Check if user is authenticated via cookie or auth header
+    let token: string | undefined = req.cookies?.access_token;
+    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+    if (token) {
+      try {
+        const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_internwala_jwt_2026';
+        const decoded = jwt.verify(token, JWT_SECRET) as AuthUserPayload;
+        targetUserId = decoded.id;
+        if (!targetEmail) targetEmail = decoded.email?.toLowerCase().trim();
+      } catch {
+        // Token invalid, fall back to body email
+      }
+    }
+
+    if (!targetEmail && !targetUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email address is required to resend verification code.',
+      });
+    }
+
+    const userRecord = targetEmail
+      ? await safeFindUserByEmail(targetEmail)
+      : await safeFindUserById(targetUserId!);
+
+    if (!userRecord) {
+      return res.status(404).json({
+        success: false,
+        message: 'No account found matching this email address. Please sign up.',
+      });
+    }
+
+    if (userRecord.emailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'This email is already verified. You have full access to all courses.',
+      });
+    }
+
+    const freshOtp = generateOtp();
+    const userEmail = userRecord.email;
+    const userName = userRecord.name;
 
     if (isDatabaseConnected && db) {
       await db
         .update(schema.users)
-        .set({ verificationToken: freshToken, updatedAt: new Date() })
-        .where(eq(schema.users.id, userId));
+        .set({ verificationToken: freshOtp, updatedAt: new Date() })
+        .where(eq(schema.users.id, userRecord.id));
     } else {
-      const user = mockUsers.find((u) => u.id === userId);
-      if (user) {
-        user.verificationToken = freshToken;
-        user.updatedAt = new Date();
-        userEmail = user.email;
-      }
+      userRecord.verificationToken = freshOtp;
+      userRecord.updatedAt = new Date();
     }
 
-    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${freshToken}`;
+    // Dispatch real email with 6-digit OTP
+    const emailResult = await sendVerificationOtpEmail(userEmail, userName, freshOtp);
+    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${freshOtp}`;
+
+    let message =
+      emailResult.success && emailResult.mode === 'smtp'
+        ? `A 6-digit verification OTP has been sent to your inbox (${userEmail}).`
+        : `A fresh 6-digit verification code has been sent to ${userEmail}.`;
+
+    if (!emailResult.success && emailResult.mode === 'smtp') {
+      const shortError = emailResult.error?.split('\n')[0] || 'SMTP Authentication Error';
+      message = `Generated fresh OTP (${freshOtp}), but SMTP delivery failed (${shortError}).`;
+    }
 
     return res.status(200).json({
       success: true,
-      message: `A fresh verification link has been sent to ${userEmail}.`,
-      verificationToken: freshToken,
+      message,
+      verificationToken: freshOtp,
       verificationLink,
+      smtpConfigured: isEmailConfigured(),
+      emailDelivery: emailResult,
     });
   } catch (error) {
     console.error('Resend verification error:', error);
@@ -577,9 +676,7 @@ router.post('/resend-verification', authenticate, async (req: Request, res: Resp
   }
 });
 
-// ============================================================================
 // 8. POST /api/auth/change-password (FR-10: Requires current password)
-// ============================================================================
 router.post('/change-password', authenticate, async (req: Request, res: Response) => {
   try {
     const validatedData = changePasswordSchema.safeParse(req.body);
@@ -638,9 +735,7 @@ router.post('/change-password', authenticate, async (req: Request, res: Response
   }
 });
 
-// ============================================================================
 // 9. POST /api/auth/forgot-password (FR-9: Forgot password emailed link)
-// ============================================================================
 router.post('/forgot-password', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res: Response) => {
   try {
     const validated = forgotPasswordSchema.safeParse(req.body);
@@ -682,9 +777,7 @@ router.post('/forgot-password', rateLimiter(15 * 60 * 1000, 10), async (req: Req
   }
 });
 
-// ============================================================================
 // 10. POST /api/auth/reset-password (FR-9: Reset password through link token)
-// ============================================================================
 router.post('/reset-password', async (req: Request, res: Response) => {
   try {
     const validated = resetPasswordSchema.safeParse(req.body);

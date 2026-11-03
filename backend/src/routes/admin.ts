@@ -30,9 +30,7 @@ const verifyAdminAccess = (req: Request, res: Response, next: Function) => {
   next();
 };
 
-// ============================================================================
 // 0. GET /api/admin/verify (Strict check verifying active administrator session)
-// ============================================================================
 router.get('/verify', authenticate, verifyAdminAccess, (req: Request, res: Response) => {
   return res.status(200).json({
     success: true,
@@ -46,9 +44,7 @@ router.get('/verify', authenticate, verifyAdminAccess, (req: Request, res: Respo
   });
 });
 
-// ============================================================================
 // Fallback in-memory stores for Purchases, Refunds, Feedback, and Notifications
-// ============================================================================
 export type { MockPurchase };
 export { mockPurchases };
 
@@ -119,11 +115,9 @@ export const mockNotifications: MockNotification[] = [
   },
 ];
 
-// ============================================================================
 // 1. CLOUDINARY MEDIA UPLOADER (FR-53)
 // POST /api/admin/upload
 // Handles image and video uploads directly to Cloudinary with modern format optimizations
-// ============================================================================
 router.post('/upload', authenticate, verifyAdminAccess, async (req: Request, res: Response) => {
   try {
     const { fileData, resourceType, folder, filename, duration } = req.body;
@@ -159,13 +153,11 @@ router.post('/upload', authenticate, verifyAdminAccess, async (req: Request, res
   }
 });
 
-// ============================================================================
 // 2. COURSES MANAGEMENT (FR-51)
 // GET /api/admin/courses
 // POST /api/admin/courses
 // PUT /api/admin/courses/:id
 // DELETE /api/admin/courses/:id
-// ============================================================================
 router.get('/courses', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
   try {
     return res.status(200).json({
@@ -306,12 +298,10 @@ router.delete('/courses/:id', authenticate, verifyAdminAccess, async (req: Reque
   }
 });
 
-// ============================================================================
 // 3. CURRICULUM: SECTIONS & LESSONS (FR-52, FR-53)
 // POST /api/admin/courses/:id/lessons
 // PUT /api/admin/courses/:id/lessons/:lessonId
 // DELETE /api/admin/courses/:id/lessons/:lessonId
-// ============================================================================
 router.post('/courses/:id/lessons', authenticate, verifyAdminAccess, async (req: Request, res: Response) => {
   try {
     const course = initialCourses.find((c) => c.id === req.params.id);
@@ -398,12 +388,10 @@ router.delete('/courses/:id/lessons/:lessonId', authenticate, verifyAdminAccess,
   }
 });
 
-// ============================================================================
 // 4. STUDENT MANAGEMENT (FR-54, FR-56)
 // GET /api/admin/students
 // POST /api/admin/students/:userId/grant-access
 // POST /api/admin/students/:userId/revoke-access
-// ============================================================================
 router.get('/students', authenticate, verifyAdminAccess, async (req: Request, res: Response) => {
   try {
     const searchQuery = (req.query.search as string)?.toLowerCase().trim() || '';
@@ -536,11 +524,9 @@ router.post('/students/:userId/revoke-access', authenticate, verifyAdminAccess, 
   }
 });
 
-// ============================================================================
 // 5. SALES & REVENUE DASHBOARD (FR-55, FR-33)
 // GET /api/admin/sales
 // POST /api/admin/sales/:id/refund
-// ============================================================================
 router.get('/sales', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
   try {
     const totalPurchases = mockPurchases.filter((p) => p.status === 'paid');
@@ -613,10 +599,8 @@ router.post('/sales/:id/refund', authenticate, verifyAdminAccess, async (req: Re
   }
 });
 
-// ============================================================================
 // 6. FEEDBACK & RATINGS (FR-57)
 // GET /api/admin/feedback
-// ============================================================================
 router.get('/feedback', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
   return res.status(200).json({
     success: true,
@@ -625,11 +609,9 @@ router.get('/feedback', authenticate, verifyAdminAccess, async (_req: Request, r
   });
 });
 
-// ============================================================================
 // 7. CONVERSION FUNNEL & ANALYTICS (FR-58)
 // GET /api/admin/analytics
 // Funnel from visit to signup to purchase to completion
-// ============================================================================
 router.get('/analytics', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
   try {
     const studentCount = mockUsers.filter((u) => u.role === 'student').length;
@@ -641,8 +623,8 @@ router.get('/analytics', authenticate, verifyAdminAccess, async (_req: Request, 
     const signupRate = estimatedVisits > 0 ? Math.round((studentCount / estimatedVisits) * 1000) / 10 : 0;
     const purchaseRate = studentCount > 0 ? Math.round((paidPurchases / studentCount) * 1000) / 10 : 0;
     const completionRate = activeEnrollments > 0 ? 50 : 0;
-    const refundRate = (paidPurchases + refundedPurchases) > 0 
-      ? Math.round((refundedPurchases / (paidPurchases + refundedPurchases)) * 1000) / 10 
+    const refundRate = (paidPurchases + refundedPurchases) > 0
+      ? Math.round((refundedPurchases / (paidPurchases + refundedPurchases)) * 1000) / 10
       : 0;
 
     return res.status(200).json({
@@ -664,10 +646,8 @@ router.get('/analytics', authenticate, verifyAdminAccess, async (_req: Request, 
   }
 });
 
-// ============================================================================
 // 8. NOTIFICATIONS & EMAIL AUDIT LOG (PRD Section 4.10)
 // GET /api/admin/notifications
-// ============================================================================
 router.get('/notifications', authenticate, verifyAdminAccess, async (_req: Request, res: Response) => {
   return res.status(200).json({
     success: true,

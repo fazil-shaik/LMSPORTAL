@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function AuthModal() {
   const {
+    user,
     authModalOpen,
     authMode,
     closeAuthModal,
@@ -105,18 +106,18 @@ export default function AuthModal() {
       } else if (authMode === 'verify') {
         const tokenToVerify = verifyTokenInput.trim();
         if (!tokenToVerify) {
-          setError('Please provide a verification token.');
+          setError('Please provide your 6-digit verification code.');
           setLoading(false);
           return;
         }
-        const result = await verifyEmail(tokenToVerify);
+        const result = await verifyEmail(tokenToVerify, email || user?.email);
         if (result.success) {
           setSuccessMessage('Email verified successfully! You now have full access to purchase courses.');
           setTimeout(() => {
             closeAuthModal();
           }, 1500);
         } else {
-          setError(result.message || 'Verification token invalid or expired.');
+          setError(result.message || 'Verification code invalid or expired.');
         }
       }
     } catch (err: any) {
@@ -139,10 +140,11 @@ export default function AuthModal() {
   const handleResendVerification = async () => {
     setLoading(true);
     setError(null);
-    const result = await resendVerification();
+    const targetEmail = email || user?.email;
+    const result = await resendVerification(targetEmail);
     setLoading(false);
     if (result.success) {
-      setSuccessMessage('Verification email resent! Check token below.');
+      setSuccessMessage(result.message || 'Verification email resent! Check your inbox for the 6-digit code.');
       if (result.verificationToken) {
         setVerifyTokenInput(result.verificationToken);
       }
@@ -233,14 +235,14 @@ export default function AuthModal() {
               {authMode === 'signup' && 'Make room for growth.'}
               {authMode === 'forgot' && 'Reset your password.'}
               {authMode === 'reset' && 'Create new password.'}
-              {authMode === 'verify' && 'Verify your email.'}
+              {authMode === 'verify' && 'Verify your email with 6-digit OTP.'}
             </h3>
             <p className="text-[#475569] dark:text-slate-300 text-[14px] leading-[1.5] mt-1.5">
               {authMode === 'signin' && 'Pick up where you left off. Your courses are waiting.'}
               {authMode === 'signup' && 'Create your InternWala account to enroll and start learning.'}
               {authMode === 'forgot' && 'Enter your email address to receive password reset instructions.'}
               {authMode === 'reset' && 'Set a strong new password for your InternWala account.'}
-              {authMode === 'verify' && 'Per PRD Section 4.2 (FR-7), email verification is required before purchasing courses.'}
+              {authMode === 'verify' && 'Enter the 6-digit verification code sent to your email to activate full course access.'}
             </p>
           </div>
 
@@ -265,18 +267,48 @@ export default function AuthModal() {
                 <Mail className="size-7" />
               </div>
 
+              {(email || user?.email) && (
+                <div className="text-center text-xs text-slate-500 dark:text-slate-400">
+                  Verification OTP sent to:{' '}
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {email || user?.email}
+                  </span>
+                </div>
+              )}
+
+              {/* If no email is known yet, allow entering it */}
+              {!email && !user?.email && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="font-semibold text-[13px] text-[#0f172a] dark:text-slate-200">
+                    Your Email Address
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your registered email"
+                    className="h-[46px] px-3.5 border border-[#e2e8f0] dark:border-slate-700 rounded-[8px] text-[14px] text-[#0f172a] dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
+                  />
+                </div>
+              )}
+
               <div className="flex flex-col gap-1.5">
                 <label className="font-semibold text-[13px] text-[#0f172a] dark:text-slate-200">
-                  Verification Token / Code
+                  6-Digit Verification Code (OTP)
                 </label>
                 <input
                   type="text"
                   required
+                  maxLength={6}
                   value={verifyTokenInput}
-                  onChange={(e) => setVerifyTokenInput(e.target.value)}
-                  placeholder="Paste token or click simulation below"
-                  className="h-[46px] px-3.5 border border-[#e2e8f0] dark:border-slate-700 rounded-[8px] text-[14px] text-[#0f172a] dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
+                  onChange={(e) => setVerifyTokenInput(e.target.value.replace(/[^0-9a-zA-Z_-]/g, ''))}
+                  placeholder="1 2 3 4 5 6"
+                  className="h-[52px] px-3.5 text-center font-mono font-bold text-2xl tracking-[8px] border border-[#e2e8f0] dark:border-slate-700 rounded-[8px] text-[#0f172a] dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
                 />
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Check your inbox and Spam/Junk folder for the 6-digit code.
+                </p>
               </div>
 
               <button
@@ -285,7 +317,7 @@ export default function AuthModal() {
                 className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-sm py-3 rounded-lg transition flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
               >
                 {loading && <Loader2 className="size-4 animate-spin" />}
-                <span>Confirm & Verify Email</span>
+                <span>Verify & Activate Account</span>
               </button>
 
               <div className="flex items-center justify-between text-xs pt-2">
@@ -296,7 +328,7 @@ export default function AuthModal() {
                   className="text-[#4f46e5] hover:underline font-semibold flex items-center gap-1"
                 >
                   <RefreshCw className="size-3" />
-                  <span>Resend email link</span>
+                  <span>Resend 6-digit OTP</span>
                 </button>
                 <button
                   type="button"
