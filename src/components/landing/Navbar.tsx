@@ -43,6 +43,17 @@ export default function Navbar({
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  const filteredCourses = useMemo(() => {
+    if (!searchQuery.trim() || !courses) return [];
+    const q = searchQuery.toLowerCase().trim();
+    return courses.filter(
+      (c) =>
+        c.title?.toLowerCase().includes(q) ||
+        c.category?.toLowerCase().includes(q) ||
+        c.instructor?.toLowerCase().includes(q)
+    );
+  }, [searchQuery, courses]);
+
   const dynamicCategories = useMemo(() => {
     if (!courses || courses.length === 0) {
       return [{ name: 'All Courses', count: 'Explore' }];
@@ -132,11 +143,50 @@ export default function Navbar({
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search for anything (Product Design, React, Systems Thinking)..."
+            placeholder={
+              courses.length > 0
+                ? `Search across ${courses.length} courses (${courses.slice(0, 2).map((c) => c.title.split(',')[0]).join(', ')}...)`
+                : 'Search for courses, skills, or topics...'
+            }
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-11 pr-4 py-2.5 bg-[#f7f9fa] dark:bg-slate-900/80 border border-[#d1d7dc] dark:border-slate-700/80 rounded-full text-xs text-[#0f172a] dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-[#2d2f31] dark:focus:border-[#a435f0] transition"
           />
+
+          {searchQuery.trim() && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl overflow-hidden z-50 animate-fadeIn">
+              {filteredCourses.length > 0 ? (
+                <div className="p-2 space-y-1">
+                  {filteredCourses.slice(0, 5).map((course) => (
+                    <button
+                      key={course.id}
+                      onClick={() => {
+                        setSearchQuery('');
+                        navigate(`/course/${course.slug || course.id}`);
+                      }}
+                      className="w-full text-left p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between transition cursor-pointer"
+                    >
+                      <div className="overflow-hidden pr-2">
+                        <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                          {course.title}
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {course.instructor} · {course.category || 'Skill'}
+                        </p>
+                      </div>
+                      <span className="text-xs font-bold text-[#a435f0] shrink-0">
+                        ${((course.priceCents ?? 20000) / 100).toFixed(0)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  No courses found for "{searchQuery}"
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Actions & Profile */}

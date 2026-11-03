@@ -23,7 +23,7 @@ export default function FaqSection() {
     },
     {
       q: 'Do I need any previous experience?',
-      a: 'Each course clearly lists its level. Product Design is beginner-friendly; bring curiosity and a willingness to practice.',
+      a: 'Each course clearly specifies its level—from beginner-friendly foundations to intermediate and advanced masterclasses. Bring curiosity and a willingness to practice.',
     },
     {
       q: 'Will I get a certificate?',

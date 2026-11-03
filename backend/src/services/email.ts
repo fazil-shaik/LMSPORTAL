@@ -157,6 +157,121 @@ export async function sendVerificationOtpEmail(
 }
 
 /**
+ * Sends a purchase receipt and welcome email to the student (PRD Section 4.5 FR-30)
+ */
+export async function sendPurchaseReceiptEmail(
+  toEmail: string,
+  name: string,
+  details: {
+    orderId: string;
+    courseTitle: string;
+    amountFormatted: string;
+    courseUrl: string;
+    receiptUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const user = (process.env.SMTP_USER || process.env.EMAIL_USER || '').trim();
+  const configuredFrom = process.env.SMTP_FROM?.trim();
+  const fromAddress =
+    configuredFrom && !configuredFrom.includes('no-reply@internwala.com')
+      ? configuredFrom
+      : user
+        ? `"InternWala" <${user}>`
+        : '"InternWala" <no-reply@internwala.com>';
+
+  const subject = `Order Confirmed: ${details.courseTitle} (Order #${details.orderId})`;
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Payment Receipt & Course Access</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b; }
+        .card { max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 14px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+        .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 28px 24px; text-align: center; color: white; }
+        .logo { font-size: 24px; font-weight: 800; }
+        .subhead { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+        .content { padding: 32px 28px; }
+        .greeting { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: #0f172a; }
+        .text { font-size: 14px; line-height: 1.6; color: #475569; margin-bottom: 20px; }
+        .receipt-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px; margin: 20px 0; }
+        .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+        .row-total { border-top: 1px dashed #cbd5e1; padding-top: 10px; margin-top: 10px; font-weight: bold; font-size: 15px; color: #0f172a; }
+        .btn-container { text-align: center; margin: 28px 0; }
+        .btn { display: inline-block; background-color: #4f46e5; color: #ffffff !important; font-weight: 700; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-size: 15px; }
+        .footer { padding: 20px 28px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="header">
+          <div class="logo">InternWala</div>
+          <div class="subhead">Payment Receipt & Course Access</div>
+        </div>
+        <div class="content">
+          <div class="greeting">Welcome aboard, ${name || 'Learner'}! 🎉</div>
+          <div class="text">
+            Your payment for <strong>${details.courseTitle}</strong> was verified successfully via Cashfree Payment Gateway. You now have full lifetime access to all lessons, assignments, and verifiable certificates.
+          </div>
+          <div class="receipt-box">
+            <div class="row"><span>Order ID:</span><strong>#${details.orderId}</strong></div>
+            <div class="row"><span>Course:</span><span>${details.courseTitle}</span></div>
+            <div class="row"><span>Payment Method:</span><span>Cashfree Secure Checkout</span></div>
+            <div class="row row-total"><span>Total Paid:</span><span>${details.amountFormatted}</span></div>
+          </div>
+          <div class="btn-container">
+            <a href="${details.courseUrl}" class="btn">Start Learning Now →</a>
+          </div>
+          <div class="text" style="font-size: 12px; color: #64748b;">
+            🛡️ 30-Day Money-Back Guarantee: If you need any assistance or want to review your invoice, contact us anytime at support@internwala.com.
+          </div>
+        </div>
+        <div class="footer">
+          &copy; ${new Date().getFullYear()} InternWala Inc. All rights reserved.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const textContent = `Hello ${name || 'Learner'},\n\nThank you for your purchase of "${details.courseTitle}". Your payment has been verified (Order #${details.orderId}).\nTotal Amount: ${details.amountFormatted}\n\nAccess your course immediately here:\n${details.courseUrl}\n\nHappy Learning,\nInternWala Team`;
+
+  const transporter = getTransporter();
+  if (transporter) {
+    try {
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        to: toEmail,
+        subject,
+        text: textContent,
+        html: htmlContent,
+      });
+
+      return {
+        success: true,
+        messageId: info.messageId,
+        mode: 'smtp',
+      };
+    } catch (smtpErr: any) {
+      console.warn('SMTP error sending receipt email:', smtpErr?.message);
+      return {
+        success: false,
+        error: smtpErr?.message || 'Failed to send receipt email.',
+        mode: 'smtp',
+      };
+    }
+  }
+
+  return {
+    success: false,
+    error: 'SMTP service is not configured.',
+    mode: 'smtp',
+  };
+}
+
+/**
  * Sends a password reset email to the user.
  */
 export async function sendPasswordResetEmail(

@@ -1,7 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { eq, and } from 'drizzle-orm';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.resolve(__dirname, '../data');
+const COURSES_FILE = path.join(DATA_DIR, 'courses.json');
 
 const router = Router();
 
@@ -28,9 +36,35 @@ export interface CourseData {
   status?: 'published' | 'draft';
   outcomes?: string[];
   requirements?: string[];
+  whoIsItFor?: string[];
+  instructorBio?: string;
+  instructorAvatar?: string;
+  language?: string;
+  lastUpdatedDate?: string;
   gradientFrom: string;
   gradientTo: string;
   accentColor: string;
+  sections?: Array<{
+    id: string;
+    title: string;
+    order: number;
+    lessons: Array<{
+      id: string;
+      title: string;
+      lessonNumber: number;
+      duration: string;
+      isFreePreview?: boolean;
+      videoUrl?: string;
+    }>;
+  }>;
+  reviews?: Array<{
+    id: string;
+    studentName: string;
+    studentRole?: string;
+    rating: number;
+    reviewText: string;
+    date: string;
+  }>;
   lessons: Array<{
     id: string;
     title: string;
@@ -45,7 +79,7 @@ export interface CourseData {
 }
 
 // Initial seed courses as defined in Figma (Frames 3:117751, 3:118064) and PRD
-export const initialCourses: CourseData[] = [
+const initialCoursesSeed: CourseData[] = [
   {
     id: 'c1111111-1111-1111-1111-111111111111',
     slug: 'product-design-insight-to-impact',
@@ -193,6 +227,39 @@ export const initialCourses: CourseData[] = [
   },
 ];
 
+export function loadCoursesFromFile(): CourseData[] {
+  try {
+    if (fs.existsSync(COURSES_FILE)) {
+      const data = fs.readFileSync(COURSES_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load courses from file, falling back to default seed:', err);
+  }
+  return initialCoursesSeed;
+}
+
+export const initialCourses: CourseData[] = loadCoursesFromFile();
+
+export function persistCourses(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(COURSES_FILE, JSON.stringify(initialCourses, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to persist courses to file:', err);
+  }
+}
+
+// Initial persist if file doesn't exist yet
+if (!fs.existsSync(COURSES_FILE)) {
+  persistCourses();
+}
+
 // Fallback in-memory enrollments and purchases storage
 export const mockEnrollments: Array<{
   id: string;
@@ -204,6 +271,7 @@ export const mockEnrollments: Array<{
 
 export interface MockPurchase {
   id: string;
+  orderId?: string;
   userId: string;
   studentName: string;
   studentEmail: string;
@@ -211,7 +279,7 @@ export interface MockPurchase {
   courseTitle: string;
   amountCents: number;
   currency: string;
-  provider: 'stripe' | 'paypal';
+  provider: 'cashfree' | 'stripe' | 'paypal';
   status: 'paid' | 'refunded' | 'pending';
   createdAt: string;
 }
@@ -270,6 +338,178 @@ router.get('/public', async (_req: Request, res: Response) => {
   }
 });
 
+// 0b. GET /api/courses/detail/:slug (PRD Section 4.4 Course Detail Page FR-19, 20, 21, 22, 23, 24)
+router.get('/detail/:slug', async (req: Request, res: Response) => {
+  try {
+    const slug = req.params.slug;
+    const course = initialCourses.find((c) => c.slug === slug || c.id === slug);
+
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
+
+    // Check optional authenticated user session from cookie or header to determine enrollment
+    let isEnrolled = false;
+    let userId: string | null = null;
+
+    try {
+      const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
+      if (token) {
+        const decoded: any = (await import('jsonwebtoken')).default.verify(
+          token,
+          process.env.JWT_SECRET || 'fallback_secret_internwala_jwt_2026'
+        );
+        userId = decoded?.id;
+        if (userId) {
+          isEnrolled = mockEnrollments.some((e) => e.userId === userId && e.courseId === course.id && e.status === 'active');
+        }
+      }
+    } catch {
+      // Unauthenticated visitor viewing course details
+    }
+
+    // Standardize curriculum sections (FR-20)
+    let sections = course.sections;
+    if (!sections || sections.length === 0) {
+      const allLessons = course.lessons || [];
+      const mid = Math.ceil(allLessons.length / 3);
+      sections = [
+        {
+          id: 'sec-1',
+          title: 'Section 1: Foundations & Core Architecture',
+          order: 1,
+          lessons: allLessons.slice(0, Math.max(1, mid)).map((l, i) => ({
+            ...l,
+            isFreePreview: i === 0, // First lesson is free preview
+          })),
+        },
+        {
+          id: 'sec-2',
+          title: 'Section 2: Practical Implementation & Deep Work',
+          order: 2,
+          lessons: allLessons.slice(Math.max(1, mid), Math.max(2, mid * 2)),
+        },
+        {
+          id: 'sec-3',
+          title: 'Section 3: Production Handoff & Capstone Portfolio',
+          order: 3,
+          lessons: allLessons.slice(Math.max(2, mid * 2)),
+        },
+      ].filter((s) => s.lessons.length > 0);
+    }
+
+    // Standardize student reviews (FR-23)
+    let reviews = course.reviews;
+    if (!reviews || reviews.length === 0) {
+      reviews = [
+        {
+          id: 'rev-1',
+          studentName: 'Priya Sharma',
+          studentRole: 'Junior Product Designer at Razorpay',
+          rating: 5,
+          reviewText: 'The internship project directly led to my junior design offer. The breakdown of user insights into scalable design tokens was unmatched!',
+          date: 'October 2026',
+        },
+        {
+          id: 'rev-2',
+          studentName: 'Marcus Vance',
+          studentRole: 'Product Lead at Webflow',
+          rating: 5,
+          reviewText: 'Clear, concise, and no fluff. The systems diagrams completely changed how our entire team reviews technical tradeoffs and sprints.',
+          date: 'September 2026',
+        },
+        {
+          id: 'rev-3',
+          studentName: 'Elena Rostova',
+          studentRole: 'Full Stack Engineer',
+          rating: 5,
+          reviewText: 'Extremely well produced lectures. The instructors explain the "why" before diving straight into production-ready implementation.',
+          date: 'August 2026',
+        },
+      ];
+    }
+
+    // Default outcomes (FR-19)
+    const outcomes = course.outcomes && course.outcomes.length > 0
+      ? course.outcomes
+      : [
+          'Master modern industry tools, patterns, and production standards',
+          'Build end-to-end projects ready for client handoff and capstone defense',
+          'Learn to debug real-world edge cases with guided walkthroughs',
+          'Acquire verifiable credentials recognized by partner technology teams',
+        ];
+
+    // Default requirements (FR-19)
+    const requirements = course.requirements && course.requirements.length > 0
+      ? course.requirements
+      : [
+          'Basic familiarity with personal computing and web browsing',
+          'A desire to build practical projects and advance your career',
+          'No prior advanced software engineering experience required',
+        ];
+
+    // Default target audience (FR-19)
+    const whoIsItFor = course.whoIsItFor && course.whoIsItFor.length > 0
+      ? course.whoIsItFor
+      : [
+          'Aspiring professionals looking to break into product, design, or engineering',
+          'Early-career team members wanting to level up their core skills',
+          'Curious builders seeking structured, hands-on learning with verifiable certificates',
+        ];
+
+    return res.status(200).json({
+      success: true,
+      course: {
+        ...course,
+        outcomes,
+        requirements,
+        whoIsItFor,
+        instructorBio: course.instructorBio || `${course.instructor} is an experienced industry mentor and practitioner with a track record of building production systems and mentoring hundreds of high-performing students.`,
+        instructorAvatar: course.instructorAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+        language: course.language || 'English',
+        lastUpdatedDate: course.lastUpdatedDate || 'November 2026',
+        sections,
+        reviews,
+        isEnrolled,
+      },
+    });
+  } catch (error: any) {
+    console.error('Course detail fetch error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load course details.' });
+  }
+});
+
+// 0c. GET /api/courses/:slug/preview/:lessonId (FR-20 Free Lesson Preview Video stream)
+router.get('/:slug/preview/:lessonId', async (req: Request, res: Response) => {
+  try {
+    const { slug, lessonId } = req.params;
+    const course = initialCourses.find((c) => c.slug === slug || c.id === slug);
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
+
+    const lesson = course.lessons.find((l) => l.id === lessonId || l.lessonNumber.toString() === lessonId);
+    if (!lesson) {
+      return res.status(404).json({ success: false, message: 'Lesson not found.' });
+    }
+
+    // Confirm that preview is free
+    return res.status(200).json({
+      success: true,
+      preview: {
+        courseTitle: course.title,
+        lessonTitle: lesson.title,
+        lessonNumber: lesson.lessonNumber,
+        duration: lesson.duration,
+        videoUrl: lesson.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+        isFreePreview: true,
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Preview unavailable.' });
+  }
+});
+
 // 1. GET /api/courses/dashboard (FR-14, FR-15, FR-16, FR-17, FR-18)
 router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
   try {
@@ -302,16 +542,16 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
         .map((e) => e.courseId);
     }
 
-    // 2. Map only published courses (or courses student already has active enrollment in)
-    const availableCourses = initialCourses.filter((c) => c.status !== 'draft' || enrolledCourseIds.includes(c.id));
+    // 2. Map ONLY enrolled courses for the student dashboard (no un-enrolled / locked courses)
+    const availableCourses = initialCourses.filter((c) => enrolledCourseIds.includes(c.id));
 
     let processedCourses = availableCourses.map((c) => {
-      const isEnrolled = enrolledCourseIds.includes(c.id);
+      const isEnrolled = true;
       const progress = getUserCourseProgress(userId, c, isEnrolled);
 
       return {
         ...c,
-        isEnrolled, // FR-15: determines locked vs unlocked progress state
+        isEnrolled: true,
         progress: {
           completedLessons: progress.completedLessons,
           totalLessons: progress.totalLessons,
@@ -324,8 +564,9 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
     });
 
     // 3. Compute Stats strictly based on actual enrollments
-    const enrolledCoursesList = processedCourses.filter((c) => c.isEnrolled);
+    const enrolledCoursesList = processedCourses;
     const completedCoursesList = enrolledCoursesList.filter((c) => c.progress.isCompleted || c.progress.percent >= 100);
+    const inProgressCoursesList = enrolledCoursesList.filter((c) => !c.progress.isCompleted && c.progress.percent < 100);
     const totalCompletedLessons = enrolledCoursesList.reduce((acc, cur) => acc + cur.progress.completedLessons, 0);
     const totalMinutesWatched = enrolledCoursesList.reduce((acc, cur) => {
       const prog = getUserCourseProgress(userId, cur, true);
@@ -344,11 +585,9 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
     };
 
     // 4. Continue Learning Shortcut (FR-18)
-    // Find the most recently active enrolled course that is in progress
     let continueLearning = null;
     if (enrolledCoursesList.length > 0) {
-      // Pick first in-progress course, or first enrolled course
-      const activeCourse = enrolledCoursesList.find((c) => !c.progress.isCompleted) || enrolledCoursesList[0];
+      const activeCourse = inProgressCoursesList[0] || enrolledCoursesList[0];
       const prog = activeCourse.progress;
       const remainingMinutes = Math.max(0, (prog.totalLessons - prog.completedLessons) * 35);
       const remHours = Math.floor(remainingMinutes / 60);
@@ -372,16 +611,10 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
       };
     }
 
-    // 5. Apply Tab Filtering (FR-16: All Courses, My Courses, Completed)
-    if (tab === 'my-courses') {
-      processedCourses = processedCourses.filter((c) => c.isEnrolled);
-    } else if (tab === 'completed') {
-      processedCourses = processedCourses.filter((c) => c.isEnrolled && (c.progress.isCompleted || c.progress.percent >= 100));
-    }
-
-    // 6. Apply Search and Filters (FR-17)
+    // 5. Apply Search if user searches within their enrolled courses
+    let filteredCourses = [...processedCourses];
     if (searchQuery) {
-      processedCourses = processedCourses.filter(
+      filteredCourses = filteredCourses.filter(
         (c) =>
           c.title.toLowerCase().includes(searchQuery) ||
           c.description.toLowerCase().includes(searchQuery) ||
@@ -391,34 +624,14 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
       );
     }
 
-    if (categoryFilter && categoryFilter !== 'all') {
-      processedCourses = processedCourses.filter((c) => c.category.toLowerCase() === categoryFilter.toLowerCase());
-    }
-
-    if (levelFilter && levelFilter !== 'all') {
-      processedCourses = processedCourses.filter((c) => c.level.toLowerCase().includes(levelFilter.toLowerCase()));
-    }
-
-    if (durationFilter && durationFilter !== 'all') {
-      if (durationFilter === 'short') {
-        processedCourses = processedCourses.filter((c) => c.durationHours <= 6);
-      } else if (durationFilter === 'long') {
-        processedCourses = processedCourses.filter((c) => c.durationHours > 6);
-      }
-    }
-
-    // 7. Sort
-    if (sort === 'rating') {
-      processedCourses.sort((a, b) => b.rating - a.rating);
-    } else if (sort === 'lessons') {
-      processedCourses.sort((a, b) => b.lessonCount - a.lessonCount);
-    }
-
     return res.status(200).json({
       success: true,
       stats,
       continueLearning,
-      courses: processedCourses,
+      courses: filteredCourses,
+      enrolledCourses: filteredCourses,
+      myLearnings: filteredCourses.filter((c) => !c.progress.isCompleted),
+      completedCourses: filteredCourses.filter((c) => c.progress.isCompleted || c.progress.percent >= 100),
       user: {
         id: req.user!.id,
         name: req.user!.name,

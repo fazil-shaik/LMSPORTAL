@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
 import courseRoutes from './routes/courses.js';
 import adminRoutes from './routes/admin.js';
+import paymentsRoutes from './routes/payments.js';
 
 dotenv.config();
 
@@ -43,6 +44,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/payments', paymentsRoutes);
 
 // 5. Global 404 Route Handler
 app.use('/api/*', (req: Request, res: Response) => {

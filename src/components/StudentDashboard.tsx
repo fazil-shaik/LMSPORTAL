@@ -1,19 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BookOpen,
-  Lock,
   Play,
-  Search,
   Sparkles,
   Award,
   CheckCircle2,
   Clock,
-  ArrowRight,
   X,
-  ChevronDown,
   ExternalLink,
   GraduationCap,
   ShieldCheck,
+  Search,
+  Download,
+  ListOrdered,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -59,54 +58,15 @@ export interface DashboardStats {
   certificatesCount: number;
 }
 
-export interface ContinueLearningData {
-  courseId: string;
-  courseTitle: string;
-  series: string;
-  tagline: string;
-  lessonNumber: number;
-  lessonTitle: string;
-  completedLessons: number;
-  totalLessons: number;
-  percent: number;
-  remainingTime: string;
-  gradientFrom: string;
-  gradientTo: string;
-  accentColor: string;
-}
-
 interface StudentDashboardProps {
   onBackToExplore?: () => void;
 }
 
 export default function StudentDashboard({ onBackToExplore }: StudentDashboardProps) {
-  const { user, openAuthModal, enrollInCourse } = useAuth();
+  const { user, openAuthModal } = useAuth();
 
-  // Tab state: 'all' | 'my-courses' | 'completed' (FR-16), initialized from URL query
-  const [activeTab, setActiveTab] = useState<'all' | 'my-courses' | 'completed'>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tabParam = params.get('tab');
-    if (tabParam === 'my-courses' || tabParam === 'completed') return tabParam;
-    return 'all';
-  });
-
-  const handleTabChange = (tab: 'all' | 'my-courses' | 'completed') => {
-    setActiveTab(tab);
-    const url = new URL(window.location.href);
-    if (tab === 'all') {
-      url.searchParams.delete('tab');
-    } else {
-      url.searchParams.set('tab', tab);
-    }
-    window.history.replaceState({}, '', url.pathname + url.search);
-  };
-
-  // Search & Filters state (FR-17)
+  // Search filter inside student's enrolled courses
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedLevel, setSelectedLevel] = useState('all');
-  const [selectedDuration, setSelectedDuration] = useState('all');
-  const [selectedSort, setSelectedSort] = useState<'newest' | 'rating' | 'lessons'>('newest');
 
   // Data states from backend
   const [courses, setCourses] = useState<DashboardCourse[]>([]);
@@ -116,7 +76,6 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
     learningTimeFormatted: '0m',
     certificatesCount: 0,
   });
-  const [continueLearning, setContinueLearning] = useState<ContinueLearningData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,35 +87,20 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
   } | null>(null);
   const [updatingProgress, setUpdatingProgress] = useState(false);
 
-  // Dynamically extract categories and levels from actual catalog
-  const dynamicCategories = useMemo(() => {
-    const set = new Set<string>();
-    courses.forEach((c) => {
-      if (c.category) set.add(c.category);
-    });
-    return Array.from(set);
-  }, [courses]);
-
-  const dynamicLevels = useMemo(() => {
-    const set = new Set<string>();
-    courses.forEach((c) => {
-      if (c.level) set.add(c.level);
-    });
-    return Array.from(set);
-  }, [courses]);
+  // Certificate Modal state
+  const [certificateModal, setCertificateModal] = useState<{
+    course: DashboardCourse;
+  } | null>(null);
 
   // Fetch Dashboard data from backend API
   const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+
       const params = new URLSearchParams({
-        tab: activeTab,
+        tab: 'my-courses',
         search: searchQuery,
-        category: selectedCategory,
-        level: selectedLevel,
-        duration: selectedDuration,
-        sort: selectedSort,
       });
 
       const res = await fetch(`/api/courses/dashboard?${params.toString()}`, {
@@ -166,9 +110,12 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          setCourses(data.courses || []);
+          // Strictly only include enrolled courses
+          const enrolledOnly: DashboardCourse[] = (data.courses || data.enrolledCourses || []).filter(
+            (c: DashboardCourse) => c.isEnrolled !== false
+          );
+          setCourses(enrolledOnly);
           if (data.stats) setStats(data.stats);
-          setContinueLearning(data.continueLearning || null);
         } else {
           setError(data.message || 'Failed to load courses');
         }
@@ -184,23 +131,11 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
     } finally {
       setLoading(false);
     }
-  }, [activeTab, searchQuery, selectedCategory, selectedLevel, selectedDuration, selectedSort, openAuthModal]);
+  }, [searchQuery, openAuthModal]);
 
   useEffect(() => {
     fetchDashboardData();
   }, [fetchDashboardData]);
-
-  // Handle Unlocking / Enrolling into a locked course (FR-15)
-  const handleEnroll = async (courseId: string) => {
-    if (!user) {
-      openAuthModal('signin');
-      return;
-    }
-    const result = await enrollInCourse(courseId);
-    if (result.success) {
-      fetchDashboardData();
-    }
-  };
 
   // Mark Lesson as Completed in backend
   const handleCompleteLesson = async () => {
@@ -229,8 +164,8 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
             lessonTitle: nextLesson.title,
           });
         } else {
-          alert('Congratulations! You completed all lessons in this course!');
           setActiveLessonModal(null);
+          setCertificateModal({ course: activeLessonModal.course });
         }
         fetchDashboardData();
       }
@@ -246,10 +181,21 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
     return user.name.split(' ')[0];
   };
 
+  // Two columns separation:
+  // 1. My Learnings: Courses in progress (or not yet 100% completed)
+  // 2. Enrolled Courses: All enrolled courses in the student's library
+  const myLearningsCourses = useMemo(() => {
+    return courses.filter((c) => !c.progress?.isCompleted && (c.progress?.percent || 0) < 100);
+  }, [courses]);
+
+  const completedCourses = useMemo(() => {
+    return courses.filter((c) => c.progress?.isCompleted || (c.progress?.percent || 0) >= 100);
+  }, [courses]);
+
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#07090e] text-[#0f172a] dark:text-slate-100 font-['Plus_Jakarta_Sans'] pb-20">
       {/* =========================================================================
-          1. HEADER & WELCOME SECTION (Figma exact match: Frame 3:117767)
+          1. HEADER & WELCOME SECTION
          ========================================================================= */}
       <section className="pt-10 pb-6 px-4 sm:px-8 lg:px-20 max-w-[1440px] mx-auto">
         <div className="flex flex-col gap-2 items-start">
@@ -291,7 +237,7 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                   onClick={onBackToExplore}
                   className="inline-flex items-center gap-2 px-4 py-2 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-900 transition shadow-xs cursor-pointer"
                 >
-                  <span>Browse all public courses</span>
+                  <span>Explore more courses</span>
                   <ExternalLink className="size-3.5" />
                 </button>
               )}
@@ -300,7 +246,7 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
         </div>
 
         {/* =========================================================================
-            2. METRIC STATS CARDS (Figma Frame 3:117773)
+            2. METRIC STATS CARDS
            ========================================================================= */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8">
           {/* Metric 1: Enrolled courses */}
@@ -312,11 +258,11 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
               <BookOpen className="size-5 text-[#4f46e5] dark:text-[#818cf8]" />
             </div>
             <span className="font-extrabold text-[32px] text-[#0f172a] dark:text-white leading-tight">
-              {stats.enrolledCount}
+              {courses.length}
             </span>
             <span className="font-normal text-[12px] text-[#15803d] dark:text-emerald-400 flex items-center gap-1">
               <span className="size-1.5 rounded-full bg-emerald-500" />
-              {stats.enrolledCount > 0 ? 'Active learning pathways' : 'One great place to start'}
+              {courses.length > 0 ? 'Active learning pathways' : 'No courses enrolled yet'}
             </span>
           </div>
 
@@ -346,474 +292,374 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
               <Award className="size-5 text-amber-500" />
             </div>
             <span className="font-extrabold text-[32px] text-[#0f172a] dark:text-white leading-tight">
-              {stats.certificatesCount}
+              {completedCourses.length}
             </span>
             <span className="font-normal text-[12px] text-[#15803d] dark:text-emerald-400 flex items-center gap-1">
               <span className="size-1.5 rounded-full bg-emerald-500" />
-              {stats.certificatesCount > 0 ? 'Verified & shareable' : 'Your first is within reach'}
+              {completedCourses.length > 0 ? 'Verified & available to share' : 'Complete a course to earn'}
             </span>
           </div>
         </div>
 
-        {/* =========================================================================
-            3. CONTINUE LEARNING SHORTCUT BANNER (FR-18 & Figma 3:117786)
-           ========================================================================= */}
-        {continueLearning ? (
-          <div className="mt-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] p-6 sm:p-8 shadow-sm">
-            <div className="flex flex-col md:flex-row gap-6 sm:gap-8 items-start">
-              {/* Course cover thumbnail */}
-              <div className="w-full md:w-[330px] shrink-0">
-                <div
-                  className="h-[176px] rounded-[12px] p-6 flex flex-col justify-between text-white relative overflow-hidden shadow-md"
-                  style={{
-                    background: `linear-gradient(135deg, ${continueLearning.gradientFrom || '#312e81'}, ${continueLearning.gradientTo || '#6d28d9'})`,
-                  }}
-                >
-                  <p className="font-bold text-[11px] tracking-[2px] uppercase opacity-90 z-10">
-                    {continueLearning.series || 'THE PRODUCT SERIES'}
-                  </p>
-
-                  <div className="flex items-end justify-between z-10">
-                    <div className="font-extrabold text-[24px] sm:text-[27px] leading-[1.06] tracking-[-1px]">
-                      {continueLearning.tagline ? (
-                        continueLearning.tagline.split('.').map((chunk, i) => (
-                          <p key={i} className="mb-0">
-                            {chunk}
-                            {i === 0 && chunk.trim() ? '.' : ''}
-                          </p>
-                        ))
-                      ) : (
-                        <p>Design with intent.</p>
-                      )}
-                    </div>
-                    <div className="size-[44px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-xs">
-                      <Sparkles className="size-5 text-white" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Next lesson details & resume action */}
-              <div className="flex-1 flex flex-col gap-3 min-w-0 w-full">
-                <div className="bg-[#eef2ff] dark:bg-indigo-950/80 px-2.5 py-1 rounded-full self-start inline-flex items-center gap-1.5">
-                  <span className="font-bold text-[11px] tracking-wider text-[#4f46e5] dark:text-[#a5b4fc] uppercase">
-                    CONTINUE YOUR JOURNEY
-                  </span>
-                </div>
-
-                <h3 className="font-extrabold text-[22px] sm:text-[26px] text-[#0f172a] dark:text-white tracking-tight leading-snug">
-                  {continueLearning.courseTitle}
-                </h3>
-
-                <p className="text-[14px] sm:text-[15px] text-[#475569] dark:text-slate-300">
-                  Lesson {continueLearning.lessonNumber} · {continueLearning.lessonTitle}
-                </p>
-
-                {/* Progress bar */}
-                <div className="flex flex-col gap-2 w-full max-w-xl mt-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-[#475569] dark:text-slate-400">
-                      {continueLearning.completedLessons} of {continueLearning.totalLessons} lessons completed
-                    </span>
-                    <span className="font-bold text-[#15803d] dark:text-emerald-400">
-                      {continueLearning.percent}%
-                    </span>
-                  </div>
-                  <div className="w-full h-2 bg-[#e2e8f0] dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#16a34a] rounded-full transition-all duration-500"
-                      style={{ width: `${Math.max(5, continueLearning.percent)}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Action button */}
-                <div className="flex items-center justify-between sm:justify-start gap-4 pt-2">
-                  <span className="text-xs text-[#64748b] dark:text-slate-400">
-                    {continueLearning.remainingTime}
-                  </span>
-
-                  <button
-                    onClick={() => {
-                      const matched = courses.find((c) => c.id === continueLearning.courseId);
-                      if (matched) {
-                        setActiveLessonModal({
-                          course: matched,
-                          lessonNumber: continueLearning.lessonNumber,
-                          lessonTitle: continueLearning.lessonTitle,
-                        });
-                      }
-                    }}
-                    className="bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-[14px] px-5 py-2.5 rounded-[8px] transition inline-flex items-center gap-2 shadow-xs cursor-pointer"
-                  >
-                    <Play className="size-4 fill-white" />
-                    <span>Continue learning</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          stats.enrolledCount === 0 && (
-            <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-900 dark:to-slate-900 border border-indigo-100 dark:border-slate-800 rounded-[12px] p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h3 className="font-bold text-lg text-slate-900 dark:text-white">
-                  Start your first certified learning path
-                </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                  Enroll in a course below to unlock video curriculum, real-world assignments, and internship readiness.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setActiveTab('all');
-                }}
-                className="bg-[#4f46e5] text-white font-bold text-xs px-5 py-2.5 rounded-lg shrink-0 hover:bg-[#4338ca] transition"
-              >
-                Browse catalog below
-              </button>
-            </div>
-          )
-        )}
-
-        {/* =========================================================================
-            4. TABS NAVIGATION (FR-16 & Figma Frame 3:117812)
-           ========================================================================= */}
-        <div className="mt-10 border-b border-[#e2e8f0] dark:border-slate-800 flex items-center gap-8">
-          <button
-            onClick={() => handleTabChange('all')}
-            className={`pb-3 text-[14px] font-['Plus_Jakarta_Sans'] transition relative cursor-pointer ${
-              activeTab === 'all'
-                ? 'font-bold text-[#4f46e5] dark:text-[#a5b4fc]'
-                : 'font-medium text-[#475569] dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <span>All Courses</span>
-            {activeTab === 'all' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4f46e5] dark:bg-[#a5b4fc] rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabChange('my-courses')}
-            className={`pb-3 text-[14px] font-['Plus_Jakarta_Sans'] transition relative cursor-pointer ${
-              activeTab === 'my-courses'
-                ? 'font-bold text-[#4f46e5] dark:text-[#a5b4fc]'
-                : 'font-medium text-[#475569] dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <span className="flex items-center gap-1.5">
-              <span>My Courses</span>
-              {stats.enrolledCount > 0 && (
-                <span className="size-5 rounded-full bg-[#eef2ff] dark:bg-indigo-950 text-[#4f46e5] dark:text-[#a5b4fc] text-xs font-bold flex items-center justify-center">
-                  {stats.enrolledCount}
-                </span>
-              )}
-            </span>
-            {activeTab === 'my-courses' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4f46e5] dark:bg-[#a5b4fc] rounded-full" />
-            )}
-          </button>
-
-          <button
-            onClick={() => handleTabChange('completed')}
-            className={`pb-3 text-[14px] font-['Plus_Jakarta_Sans'] transition relative cursor-pointer ${
-              activeTab === 'completed'
-                ? 'font-bold text-[#4f46e5] dark:text-[#a5b4fc]'
-                : 'font-medium text-[#475569] dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <span>Completed</span>
-            {activeTab === 'completed' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#4f46e5] dark:bg-[#a5b4fc] rounded-full" />
-            )}
-          </button>
-        </div>
-
-        {/* =========================================================================
-            5. SEARCH & FILTERS BAR (FR-17 & Figma Frame 3:117824)
-           ========================================================================= */}
-        <div className="mt-8 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-          {/* Search Input */}
-          <div className="relative flex-1 max-w-lg">
+        {/* Quick Search Bar within Enrolled Library */}
+        {courses.length > 0 && (
+          <div className="mt-8 relative max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search courses by title, topic, or instructor..."
-              className="w-full pl-10 pr-4 h-[46px] bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[14px] text-[#0f172a] dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] shadow-2xs"
+              placeholder="Search your courses by title or topic..."
+              className="w-full pl-10 pr-4 h-[42px] bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-lg text-xs text-[#0f172a] dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <X className="size-4" />
+                <X className="size-3.5" />
               </button>
             )}
           </div>
-
-          {/* Filter Dropdowns */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Category Filter */}
-            <div className="relative">
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
-              >
-                <option value="all">All categories</option>
-                {dynamicCategories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
-            </div>
-
-            {/* Level Filter */}
-            <div className="relative">
-              <select
-                value={selectedLevel}
-                onChange={(e) => setSelectedLevel(e.target.value)}
-                className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
-              >
-                <option value="all">All levels</option>
-                {dynamicLevels.map((lvl) => (
-                  <option key={lvl} value={lvl}>
-                    {lvl}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
-            </div>
-
-            {/* Duration Filter */}
-            <div className="relative">
-              <select
-                value={selectedDuration}
-                onChange={(e) => setSelectedDuration(e.target.value)}
-                className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
-              >
-                <option value="all">All durations</option>
-                <option value="short">≤ 6 hours</option>
-                <option value="long">&gt; 6 hours</option>
-              </select>
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
-            </div>
-
-            {/* Sort Filter */}
-            <div className="relative">
-              <select
-                value={selectedSort}
-                onChange={(e) => setSelectedSort(e.target.value as any)}
-                className="h-[46px] px-3.5 pr-8 bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[8px] text-[13px] font-bold text-[#0f172a] dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#4f46e5] appearance-none cursor-pointer shadow-2xs"
-              >
-                <option value="newest">Newest first</option>
-                <option value="rating">Highest rated</option>
-                <option value="lessons">Most lessons</option>
-              </select>
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* =========================================================================
-            6. COURSES GRID (FR-14 & FR-15: Locked State vs Progress State)
+            3. TWO COLUMNS ONLY: "MY LEARNINGS" AND "ENROLLED COURSES"
            ========================================================================= */}
-        <div className="mt-8">
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-pulse">
-              {[1, 2, 3].map((n) => (
-                <div key={n} className="h-80 bg-slate-200 dark:bg-slate-800 rounded-xl" />
-              ))}
-            </div>
-          ) : error ? (
-            <div className="p-8 text-center bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-700 dark:text-rose-300">
-              <p className="font-semibold">{error}</p>
-              <button
-                onClick={fetchDashboardData}
-                className="mt-3 text-xs font-bold underline"
-              >
-                Retry
-              </button>
-            </div>
-          ) : courses.length === 0 ? (
-            <div className="p-12 text-center bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl">
-              <GraduationCap className="size-12 text-slate-400 mx-auto mb-3" />
-              <h4 className="font-bold text-lg text-slate-800 dark:text-slate-200">
-                No courses match your criteria
-              </h4>
-              <p className="text-xs text-slate-500 mt-1">
-                Try clearing your search query or reset filters to see all available learning tracks.
-              </p>
-              <button
-                onClick={() => {
-                  setSearchQuery('');
-                  setSelectedCategory('all');
-                  setSelectedLevel('all');
-                  setSelectedDuration('all');
-                  setActiveTab('all');
-                }}
-                className="mt-4 px-4 py-2 bg-[#4f46e5] text-white rounded-lg text-xs font-bold"
-              >
-                Reset all filters
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {courses.map((course) => {
-                const isPurchased = course.isEnrolled; // FR-15: true = unlocked/progress, false = locked
+        {loading ? (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8 animate-pulse">
+            <div className="h-96 bg-slate-200 dark:bg-slate-800 rounded-xl" />
+            <div className="h-96 bg-slate-200 dark:bg-slate-800 rounded-xl" />
+          </div>
+        ) : error ? (
+          <div className="mt-8 p-8 text-center bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-700 dark:text-rose-300">
+            <p className="font-semibold">{error}</p>
+            <button onClick={fetchDashboardData} className="mt-3 text-xs font-bold underline">
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8 items-start">
+            {/* ===================================================================
+                COLUMN 1: MY LEARNINGS (Active Ongoing Coursework & Progress)
+               =================================================================== */}
+            <div className="flex flex-col gap-5">
+              <div className="flex items-center justify-between pb-2 border-b border-[#e2e8f0] dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="size-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/80 text-[#4f46e5] dark:text-[#a5b4fc] flex items-center justify-center">
+                    <Sparkles className="size-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-extrabold text-lg text-[#0f172a] dark:text-white">
+                      My Learnings
+                    </h2>
+                    <p className="text-[12px] text-slate-500">
+                      Ongoing coursework and lessons in progress
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[#eef2ff] dark:bg-indigo-950 text-[#4f46e5] dark:text-[#a5b4fc]">
+                  {myLearningsCourses.length} active
+                </span>
+              </div>
 
-                return (
-                  <div
-                    key={course.id}
-                    className="bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden flex flex-col justify-between shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] hover:shadow-lg transition-all duration-200 group"
-                  >
-                    {/* Thumbnail Cover Header */}
-                    <div
-                      className="h-[176px] p-6 flex flex-col justify-between text-white relative overflow-hidden"
-                      style={{
-                        background: `linear-gradient(135deg, ${course.gradientFrom || '#312e81'}, ${course.gradientTo || '#6d28d9'})`,
-                      }}
-                    >
-                      {/* Ambient Glow */}
-                      <div className="absolute right-[-40px] top-[-80px] size-[240px] bg-white/10 rounded-full blur-2xl pointer-events-none" />
-
-                      {/* Locked Scrim (FR-15: Locked state for unpurchased courses) */}
-                      {!isPurchased && (
-                        <div className="absolute inset-0 bg-[#0f172a]/30 backdrop-blur-[0.5px] z-5 pointer-events-none" />
-                      )}
-
-                      <p className="font-bold text-[11px] tracking-[2px] uppercase opacity-90 z-10">
-                        {course.series || 'THE INTERNWALA SERIES'}
+              {myLearningsCourses.length === 0 ? (
+                <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-3">
+                  {completedCourses.length > 0 ? (
+                    <>
+                      <div className="size-12 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 flex items-center justify-center">
+                        <Award className="size-6" />
+                      </div>
+                      <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                        All enrolled coursework completed!
+                      </h3>
+                      <p className="text-xs text-slate-500 max-w-sm">
+                        You have successfully completed every enrolled course. Revisit any lesson in the Enrolled Courses column or explore new certifications.
                       </p>
-
-                      <div className="flex items-end justify-between z-10">
-                        <div className="font-extrabold text-[24px] leading-[1.06] tracking-[-1px]">
-                          {course.tagline ? (
-                            course.tagline.split('.').map((chunk, i) => (
-                              <p key={i} className="mb-0">
-                                {chunk}
-                                {i === 0 && chunk.trim() ? '.' : ''}
-                              </p>
-                            ))
-                          ) : (
-                            <p>Build with intent.</p>
-                          )}
-                        </div>
-
-                        {/* Symbol: Lock badge for unpurchased, Sparkles for purchased */}
-                        <div className="size-[44px] rounded-[12px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-xs">
-                          {isPurchased ? (
-                            <Sparkles className="size-5 text-white" />
-                          ) : (
-                            <Lock className="size-5 text-white" />
-                          )}
-                        </div>
+                      {onBackToExplore && (
+                        <button
+                          onClick={onBackToExplore}
+                          className="mt-2 text-xs font-bold px-4 py-2 bg-[#4f46e5] text-white rounded-lg hover:bg-[#4338ca] transition"
+                        >
+                          Explore new courses
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="size-12 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-500 flex items-center justify-center">
+                        <BookOpen className="size-6" />
                       </div>
-                    </div>
+                      <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                        No active learnings yet
+                      </h3>
+                      <p className="text-xs text-slate-500 max-w-sm">
+                        Enroll in a course from our catalog to unlock video lessons, assignments, and verified certificates.
+                      </p>
+                      {onBackToExplore && (
+                        <button
+                          onClick={onBackToExplore}
+                          className="mt-2 text-xs font-bold px-4 py-2 bg-[#4f46e5] text-white rounded-lg hover:bg-[#4338ca] transition"
+                        >
+                          Find a course to start
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {myLearningsCourses.map((course) => {
+                    const currentLessonNum = course.progress?.lastOpenedLessonNumber || 1;
+                    const currentLessonTitle =
+                      course.progress?.lastOpenedLessonTitle ||
+                      course.lessons?.[0]?.title ||
+                      'Lesson 1';
+                    const percent = course.progress?.percent || 0;
 
-                    {/* Course Information Body */}
-                    <div className="p-6 flex flex-col gap-4 flex-1 justify-between">
-                      <div className="flex flex-col gap-3">
-                        {/* Category & Rating Row */}
-                        <div className="flex items-center justify-between">
-                          <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[12px] px-2.5 py-1 rounded-full">
-                            {course.category}
-                          </span>
-                          <span className="text-[#b45309] dark:text-amber-400 font-normal text-[12px]">
-                            ★ {course.rating} ({course.reviewCount})
-                          </span>
+                    return (
+                      <div
+                        key={course.id}
+                        className="bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col"
+                      >
+                        {/* Course Cover Banner */}
+                        <div
+                          className="h-[140px] p-5 relative overflow-hidden flex flex-col justify-between text-white"
+                          style={{
+                            background: course.thumbnail
+                              ? `url(${course.thumbnail}) center / cover no-repeat`
+                              : `linear-gradient(135deg, ${course.gradientFrom || '#312e81'}, ${course.gradientTo || '#6d28d9'})`,
+                          }}
+                        >
+                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[0.5px]" />
+                          <div className="flex items-center justify-between z-10">
+                            <span className="font-bold text-[10px] tracking-wider uppercase text-white/90">
+                              {course.series || 'THE CAREER SERIES'}
+                            </span>
+                            <span className="bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] font-bold">
+                              {percent}% Complete
+                            </span>
+                          </div>
+                          <div className="z-10">
+                            <h3 className="font-extrabold text-lg leading-tight line-clamp-1">
+                              {course.tagline || course.title}
+                            </h3>
+                            <p className="text-xs text-white/80 line-clamp-1">{course.title}</p>
+                          </div>
                         </div>
 
-                        {/* Title */}
-                        <h4 className="font-bold text-[18px] sm:text-[20px] text-[#0f172a] dark:text-white leading-[1.35] line-clamp-2">
-                          {course.title}
-                        </h4>
-
-                        {/* Meta: Instructor, Lessons, Hours (FR-14) */}
-                        <p className="font-normal text-[13px] sm:text-[14px] text-[#475569] dark:text-slate-400">
-                          {course.instructor} · {course.lessonCount} lessons · {course.durationHours} hours
-                        </p>
-                      </div>
-
-                      {/* Dynamic Footer: Progress Bar for Purchased vs Lock & Price for Unpurchased (FR-15) */}
-                      <div className="pt-3 border-t border-[#e2e8f0] dark:border-slate-800">
-                        {isPurchased ? (
-                          <div className="flex flex-col gap-3">
-                            {/* Progress details */}
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex items-center justify-between text-xs font-semibold text-[#475569] dark:text-slate-400">
-                                <span>
-                                  {course.progress?.completedLessons || 0} of {course.lessonCount} lessons completed
-                                </span>
-                                <span className="font-bold text-[#15803d] dark:text-emerald-400">
-                                  {course.progress?.percent || 0}%
-                                </span>
-                              </div>
-                              <div className="w-full h-1.5 bg-[#e2e8f0] dark:bg-slate-800 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-[#16a34a] rounded-full transition-all"
-                                  style={{ width: `${Math.max(5, course.progress?.percent || 0)}%` }}
-                                />
+                        {/* Progress and Resume Action */}
+                        <div className="p-5 flex flex-col gap-4">
+                          {/* Next Lesson Indicator */}
+                          <div className="bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="size-6 rounded-full bg-[#eef2ff] dark:bg-indigo-950 text-[#4f46e5] dark:text-[#a5b4fc] text-xs font-bold flex items-center justify-center shrink-0">
+                                {currentLessonNum}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                  Current Lesson
+                                </p>
+                                <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                                  {currentLessonTitle}
+                                </p>
                               </div>
                             </div>
+                            <span className="text-[11px] text-slate-400 shrink-0">
+                              {course.durationHours || 6}h track
+                            </span>
+                          </div>
 
-                            {/* Status badge & Resume button */}
-                            <div className="flex items-center justify-between pt-1">
-                              <div className="bg-[#eef2ff] dark:bg-indigo-950 px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 text-xs font-bold text-[#4f46e5] dark:text-[#a5b4fc]">
-                                <BookOpen className="size-3.5" />
-                                <span>
-                                  {course.progress?.isCompleted ? 'Completed' : 'In progress'}
+                          {/* Progress bar */}
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500 dark:text-slate-400">
+                                {course.progress?.completedLessons || 0} of {course.lessonCount} lessons completed
+                              </span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                                {percent}%
+                              </span>
+                            </div>
+                            <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                                style={{ width: `${Math.max(5, percent)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Action Button */}
+                          <button
+                            onClick={() => {
+                              setActiveLessonModal({
+                                course,
+                                lessonNumber: currentLessonNum,
+                                lessonTitle: currentLessonTitle,
+                              });
+                            }}
+                            className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs py-2.5 px-4 rounded-xl transition inline-flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+                          >
+                            <Play className="size-3.5 fill-white" />
+                            <span>
+                              {percent > 0 ? `Resume Lesson ${currentLessonNum}` : 'Start Lesson 1'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ===================================================================
+                COLUMN 2: ENROLLED COURSES (All Unlocked Courses in Account)
+               =================================================================== */}
+            <div className="flex flex-col gap-5">
+              <div className="flex items-center justify-between pb-2 border-b border-[#e2e8f0] dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <div className="size-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <GraduationCap className="size-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-extrabold text-lg text-[#0f172a] dark:text-white">
+                      Enrolled Courses
+                    </h2>
+                    <p className="text-[12px] text-slate-500">
+                      All courses unlocked in your account
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300">
+                  {courses.length} enrolled
+                </span>
+              </div>
+
+              {courses.length === 0 ? (
+                <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-3">
+                  <div className="size-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center">
+                    <GraduationCap className="size-6" />
+                  </div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    No courses enrolled yet
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-sm">
+                    Discover practical, beautifully structured courses with verified certificates on the landing page.
+                  </p>
+                  {onBackToExplore && (
+                    <button
+                      onClick={onBackToExplore}
+                      className="mt-2 text-xs font-bold px-4 py-2 bg-[#4f46e5] text-white rounded-lg hover:bg-[#4338ca] transition"
+                    >
+                      Browse course catalog
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-5">
+                  {courses.map((course) => {
+                    const isCompleted =
+                      course.progress?.isCompleted || (course.progress?.percent || 0) >= 100;
+
+                    return (
+                      <div
+                        key={course.id}
+                        className="bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col"
+                      >
+                        {/* Course Header Banner */}
+                        <div
+                          className="h-[120px] p-4 relative overflow-hidden flex flex-col justify-between text-white"
+                          style={{
+                            background: course.thumbnail
+                              ? `url(${course.thumbnail}) center / cover no-repeat`
+                              : `linear-gradient(135deg, ${course.gradientFrom || '#312e81'}, ${course.gradientTo || '#6d28d9'})`,
+                          }}
+                        >
+                          <div className="absolute inset-0 bg-black/40 backdrop-blur-[0.5px]" />
+                          <div className="flex items-center justify-between z-10">
+                            <span className="font-bold text-[10px] tracking-wider uppercase text-white/90">
+                              {course.category}
+                            </span>
+                            {isCompleted ? (
+                              <span className="bg-emerald-500/90 text-white px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1">
+                                <CheckCircle2 className="size-3" />
+                                <span>Completed</span>
+                              </span>
+                            ) : (
+                              <span className="bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] font-bold">
+                                {course.progress?.percent || 0}% Done
+                              </span>
+                            )}
+                          </div>
+                          <div className="z-10">
+                            <h3 className="font-extrabold text-base leading-tight line-clamp-1">
+                              {course.title}
+                            </h3>
+                            <p className="text-[11px] text-white/80">
+                              {course.instructor} · {course.lessonCount} lessons
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Card Content & Action Bar */}
+                        <div className="p-4 flex flex-col gap-3">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                            {course.description}
+                          </p>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-1.5">
+                              {course.badge && (
+                                <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[10px] px-1.5 py-0.5 rounded">
+                                  {course.badge}
                                 </span>
-                              </div>
+                              )}
+                              <span className="text-[11px] text-slate-400">{course.level}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              {isCompleted && (
+                                <button
+                                  onClick={() => setCertificateModal({ course })}
+                                  className="text-xs font-bold px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 transition inline-flex items-center gap-1 cursor-pointer"
+                                  title="View verified certificate"
+                                >
+                                  <Award className="size-3.5" />
+                                  <span>Certificate</span>
+                                </button>
+                              )}
 
                               <button
                                 onClick={() => {
                                   setActiveLessonModal({
                                     course,
                                     lessonNumber: course.progress?.lastOpenedLessonNumber || 1,
-                                    lessonTitle: course.progress?.lastOpenedLessonTitle || course.lessons[0]?.title || 'Lesson 1',
+                                    lessonTitle:
+                                      course.progress?.lastOpenedLessonTitle ||
+                                      course.lessons?.[0]?.title ||
+                                      'Lesson 1',
                                   });
                                 }}
-                                className="font-bold text-[14px] text-[#4f46e5] dark:text-[#818cf8] hover:underline inline-flex items-center gap-1 cursor-pointer"
+                                className="text-xs font-bold px-3.5 py-1.5 rounded-lg bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200 transition inline-flex items-center gap-1.5 cursor-pointer"
                               >
-                                <span>Resume</span>
-                                <ArrowRight className="size-4" />
+                                <ListOrdered className="size-3.5" />
+                                <span>{isCompleted ? 'Review Syllabus' : 'Open Course'}</span>
                               </button>
                             </div>
                           </div>
-                        ) : (
-                          /* Locked State for Unpurchased Courses (FR-15) */
-                          <div className="flex items-center justify-between">
-                            <div className="bg-[#f1f5f9] dark:bg-slate-800 px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 text-xs font-bold text-[#475569] dark:text-slate-300">
-                              <Lock className="size-3.5" />
-                              <span>Locked</span>
-                            </div>
-
-                            <button
-                              onClick={() => handleEnroll(course.id)}
-                              className="font-bold text-[14px] text-[#4f46e5] dark:text-[#818cf8] hover:text-[#4338ca] hover:underline inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <span>${course.priceCents / 100} / ₹499 →</span>
-                            </button>
-                          </div>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </section>
 
       {/* =========================================================================
-          7. INTERACTIVE LESSON WORKSPACE / PLAYER MODAL
+          4. INTERACTIVE LESSON PLAYER MODAL
          ========================================================================= */}
       {activeLessonModal && (
         <div
@@ -842,14 +688,14 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
               </button>
             </div>
 
-            {/* Video Lesson Simulation Area */}
+            {/* Video Lesson Area */}
             <div className="p-6 overflow-y-auto flex flex-col gap-6">
               <div className="aspect-video bg-slate-900 rounded-xl relative overflow-hidden flex flex-col justify-between p-6 text-white shadow-inner">
                 <div className="flex items-center justify-between text-xs text-white/70">
                   <span className="font-semibold uppercase tracking-wider">
-                    {activeLessonModal.course.series}
+                    {activeLessonModal.course.series || 'INTERNWALA CURRICULUM'}
                   </span>
-                  <span className="bg-white/20 px-2 py-0.5 rounded text-[11px]">1080p HD</span>
+                  <span className="bg-white/20 px-2 py-0.5 rounded text-[11px]">1080p Stream</span>
                 </div>
 
                 <div className="text-center my-auto">
@@ -860,13 +706,13 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                     {activeLessonModal.lessonTitle}
                   </h2>
                   <p className="text-xs text-white/80 mt-1">
-                    Taught by {activeLessonModal.course.instructor}
+                    Instructor: {activeLessonModal.course.instructor}
                   </p>
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-white/80 border-t border-white/10 pt-3">
-                  <span>Interactive Lecture · 32:45</span>
-                  <span className="text-emerald-400 font-bold">Auto-synced with InternWala backend</span>
+                  <span>Interactive Lecture · 30:00</span>
+                  <span className="text-emerald-400 font-bold">Auto-synced with progress engine</span>
                 </div>
               </div>
 
@@ -874,17 +720,17 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                 <div>
                   <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                    Completed this lesson?
+                    Finished this lesson?
                   </h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Marking complete updates your course progress bar and moves your Continue Learning shortcut forward.
+                    Marking complete updates your progress bar and advances your coursework.
                   </p>
                 </div>
 
                 <button
                   onClick={handleCompleteLesson}
                   disabled={updatingProgress}
-                  className="bg-[#16a34a] hover:bg-[#15803d] text-white font-bold text-xs px-5 py-2.5 rounded-lg transition inline-flex items-center gap-2 shrink-0 disabled:opacity-50"
+                  className="bg-[#16a34a] hover:bg-[#15803d] text-white font-bold text-xs px-5 py-2.5 rounded-lg transition inline-flex items-center gap-2 shrink-0 disabled:opacity-50 cursor-pointer"
                 >
                   <CheckCircle2 className="size-4" />
                   <span>{updatingProgress ? 'Updating...' : 'Mark Lesson Complete & Next →'}</span>
@@ -907,10 +753,11 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                           lessonTitle: les.title,
                         })
                       }
-                      className={`p-3.5 flex items-center justify-between cursor-pointer transition text-xs ${les.lessonNumber === activeLessonModal.lessonNumber
+                      className={`p-3.5 flex items-center justify-between cursor-pointer transition text-xs ${
+                        les.lessonNumber === activeLessonModal.lessonNumber
                           ? 'bg-[#eef2ff] dark:bg-indigo-950/60 font-bold text-[#4f46e5] dark:text-[#a5b4fc]'
                           : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                        }`}
+                      }`}
                     >
                       <div className="flex items-center gap-2.5">
                         <span className="size-5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center text-[10px] font-bold">
@@ -923,6 +770,79 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          5. VERIFIED COMPLETION CERTIFICATE MODAL
+         ========================================================================= */}
+      {certificateModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in"
+          onClick={() => setCertificateModal(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border-2 border-amber-300 dark:border-amber-700/80 rounded-2xl max-w-2xl w-full p-8 shadow-2xl flex flex-col items-center text-center relative my-auto"
+          >
+            <button
+              onClick={() => setCertificateModal(null)}
+              className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="size-5" />
+            </button>
+
+            <div className="size-16 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-4">
+              <Award className="size-8" />
+            </div>
+
+            <span className="font-bold text-[11px] uppercase tracking-widest text-amber-600 dark:text-amber-400">
+              VERIFIED INTERNWALA CERTIFICATE
+            </span>
+
+            <h2 className="font-extrabold text-2xl sm:text-3xl text-slate-900 dark:text-white mt-1">
+              Certificate of Completion
+            </h2>
+
+            <p className="text-xs text-slate-500 mt-2">This certifies that</p>
+            <p className="font-extrabold text-xl sm:text-2xl text-[#4f46e5] dark:text-[#818cf8] mt-1 border-b-2 border-slate-200 dark:border-slate-800 pb-2 px-8">
+              {user?.name || 'InternWala Student'}
+            </p>
+
+            <p className="text-xs text-slate-500 mt-3">has successfully mastered and completed</p>
+            <h3 className="font-bold text-lg text-slate-900 dark:text-white mt-1">
+              {certificateModal.course.title}
+            </h3>
+
+            <p className="text-xs text-slate-400 mt-1">
+              Curriculum by {certificateModal.course.instructor} · {certificateModal.course.lessonCount} lessons
+            </p>
+
+            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 w-full flex items-center justify-between text-xs text-slate-400">
+              <span className="font-mono">
+                ID: IW-CERT-{certificateModal.course.id.slice(0, 8).toUpperCase()}
+              </span>
+              <span>Issued: {new Date().toLocaleDateString()}</span>
+            </div>
+
+            <div className="flex items-center gap-3 mt-6">
+              <button
+                onClick={() => {
+                  window.print();
+                }}
+                className="bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs px-5 py-2.5 rounded-xl transition inline-flex items-center gap-2 cursor-pointer"
+              >
+                <Download className="size-3.5" />
+                <span>Print / Save Certificate</span>
+              </button>
+              <button
+                onClick={() => setCertificateModal(null)}
+                className="text-xs font-bold px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

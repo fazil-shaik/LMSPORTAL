@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { initialCourses, CourseData, mockEnrollments, mockPurchases, MockPurchase, getUserCourseProgress } from './courses.js';
+import { initialCourses, CourseData, mockEnrollments, mockPurchases, MockPurchase, getUserCourseProgress, persistCourses } from './courses.js';
 import { mockUsers } from './auth.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -117,17 +117,24 @@ export const mockNotifications: MockNotification[] = [
 
 // 1. CLOUDINARY MEDIA UPLOADER (FR-53)
 // POST /api/admin/upload
-// Handles image and video uploads directly to Cloudinary with modern format optimizations
+// Handles image and video uploads directly to Cloudinary organized by course name
 router.post('/upload', authenticate, verifyAdminAccess, async (req: Request, res: Response) => {
   try {
-    const { fileData, resourceType, folder, filename, duration } = req.body;
+    const { fileData, resourceType, folder, filename, duration, courseName } = req.body;
 
     if (!fileData) {
       return res.status(400).json({ success: false, message: 'fileData (Base64 or URL) is required.' });
     }
 
+    // Dynamic Cloudinary folder reference to course name
+    let targetFolder = folder;
+    if (!targetFolder && courseName) {
+      const sanitized = courseName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      targetFolder = `internwala/courses/${sanitized}/${resourceType === 'video' ? 'videos' : 'images'}`;
+    }
+
     const uploadResult = await uploadToCloudinary(fileData, {
-      folder: folder || 'internwala/courses',
+      folder: targetFolder || 'internwala/courses',
       resourceType: resourceType || 'auto',
       filename,
       duration,
@@ -236,6 +243,7 @@ router.post('/courses', authenticate, verifyAdminAccess, async (req: Request, re
     };
 
     initialCourses.unshift(newCourse);
+    persistCourses();
 
     return res.status(201).json({
       success: true,
@@ -266,6 +274,7 @@ router.put('/courses/:id', authenticate, verifyAdminAccess, async (req: Request,
     };
 
     initialCourses[courseIdx] = updated;
+    persistCourses();
 
     return res.status(200).json({
       success: true,
@@ -288,6 +297,7 @@ router.delete('/courses/:id', authenticate, verifyAdminAccess, async (req: Reque
     }
 
     initialCourses.splice(courseIdx, 1);
+    persistCourses();
 
     return res.status(200).json({
       success: true,
@@ -326,6 +336,7 @@ router.post('/courses/:id/lessons', authenticate, verifyAdminAccess, async (req:
     course.lessons.push(newLesson);
     course.lessonCount = course.lessons.length;
     course.totalDuration = `${Math.ceil(course.lessonCount * 0.5)} hours · ${course.lessonCount} lessons`;
+    persistCourses();
 
     return res.status(201).json({
       success: true,
@@ -354,6 +365,7 @@ router.put('/courses/:id/lessons/:lessonId', authenticate, verifyAdminAccess, as
       ...course.lessons[lessonIdx],
       ...req.body,
     };
+    persistCourses();
 
     return res.status(200).json({
       success: true,
@@ -378,6 +390,7 @@ router.delete('/courses/:id/lessons/:lessonId', authenticate, verifyAdminAccess,
       l.lessonNumber = i + 1;
     });
     course.lessonCount = course.lessons.length;
+    persistCourses();
 
     return res.status(200).json({
       success: true,
@@ -565,19 +578,29 @@ router.get('/sales', authenticate, verifyAdminAccess, async (_req: Request, res:
 });
 
 // FR-33: Process refund and revoke course access
-router.post('/sales/:id/refund', authenticate, verifyAdminAccess, async (req: Request, res: Response) => {
+const handleProcessRefund = async (req: Request, res: Response) => {
   try {
-    const purchase = mockPurchases.find((p) => p.id === req.params.id);
+    const purchase = mockPurchases.find((p) => p.id === req.params.id || (p as any).orderId === req.params.id);
     if (!purchase) {
       return res.status(404).json({ success: false, message: 'Purchase record not found.' });
     }
 
     purchase.status = 'refunded';
 
-    // Revoke corresponding student enrollment
+    // Revoke corresponding student enrollment immediately (FR-33)
     const enrollment = mockEnrollments.find((e) => e.userId === purchase.userId && e.courseId === purchase.courseId);
     if (enrollment) {
       enrollment.status = 'revoked';
+    }
+
+    // Also update Neon DB if connected
+    if (isDatabaseConnected && db) {
+      try {
+        await db.update(schema.purchases).set({ status: 'refunded' }).where(eq(schema.purchases.id, purchase.id));
+        await db.update(schema.enrollments).set({ status: 'revoked' }).where(and(eq(schema.enrollments.userId, purchase.userId), eq(schema.enrollments.courseId, purchase.courseId)));
+      } catch (dbErr) {
+        console.warn('DB refund update error:', dbErr);
+      }
     }
 
     mockNotifications.unshift({
@@ -597,7 +620,10 @@ router.post('/sales/:id/refund', authenticate, verifyAdminAccess, async (req: Re
   } catch (error: any) {
     return res.status(500).json({ success: false, message: 'Failed to process refund.' });
   }
-});
+};
+
+router.post('/sales/:id/refund', authenticate, verifyAdminAccess, handleProcessRefund);
+router.post('/purchases/:id/refund', authenticate, verifyAdminAccess, handleProcessRefund);
 
 // 6. FEEDBACK & RATINGS (FR-57)
 // GET /api/admin/feedback

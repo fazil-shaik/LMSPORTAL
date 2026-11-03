@@ -5,6 +5,8 @@ import { useAuth } from './context/AuthContext';
 import AuthModal from './components/AuthModal';
 import AccountSettingsModal from './components/AccountSettingsModal';
 import StudentDashboard from './components/StudentDashboard';
+import CourseDetailPage from './components/CourseDetailPage';
+import CheckoutSuccessPage from './components/CheckoutSuccessPage';
 import AdminGuard from './components/AdminGuard';
 
 // Modular Landing Page Components
@@ -117,6 +119,12 @@ export default function App() {
   // Routing indicators
   const isDashboard = currentPath.startsWith('/dashboard');
   const isAdmin = currentPath.startsWith('/admin');
+  const isCourseDetail = currentPath.startsWith('/course/') || currentPath.startsWith('/courses/');
+  const isCheckoutSuccess = currentPath.startsWith('/checkout/success');
+
+  const courseSlug = isCourseDetail
+    ? currentPath.replace(/^\/courses?\//, '').split('?')[0]
+    : '';
 
   return (
     <div className="bg-white dark:bg-[#0a0d16] text-[#0f172a] dark:text-[#f1f5f9] font-sans antialiased min-h-screen flex flex-col selection:bg-[#a435f0] selection:text-white transition-colors duration-300">
@@ -145,6 +153,14 @@ export default function App() {
         />
       ) : isDashboard ? (
         <StudentDashboard onBackToExplore={() => navigate('/')} />
+      ) : isCourseDetail ? (
+        <CourseDetailPage
+          slug={courseSlug}
+          onBack={() => navigate('/')}
+          onNavigate={navigate}
+        />
+      ) : isCheckoutSuccess ? (
+        <CheckoutSuccessPage onNavigate={navigate} />
       ) : (
         <>
           {/* Landing Page Content Sections */}
@@ -156,6 +172,7 @@ export default function App() {
             enrolledCourses={enrolledCourses}
             onEnroll={enrollInCourse}
             onNavigateToDashboard={() => navigate('/dashboard')}
+            onNavigateToCourse={(slug) => navigate(`/course/${slug}`)}
           />
           <HowItWorksSection />
           <TestimonialsSection />

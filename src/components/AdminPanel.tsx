@@ -316,6 +316,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
             fileData: base64Data,
             resourceType: isVideo ? 'video' : 'image',
             folder: isVideo ? 'internwala/lessons' : 'internwala/courses',
+            courseName: selectedCourse?.title || selectedCourse?.slug || 'general',
             filename: file.name.replace(/[^a-zA-Z0-9_\-]/g, '_'),
           }),
         });
@@ -837,7 +838,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                       </div>
                     )}
 
-                    {/* Course Form Fields (FR-51) */}
+                    {/* Course Form Fields (FR-51: Dynamic Course Template Editor) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -848,6 +849,33 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                           value={selectedCourse.title}
                           onChange={(e) => setSelectedCourse({ ...selectedCourse, title: e.target.value })}
                           className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                          placeholder="e.g. Product Design, from insight to impact"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Cover Tagline (Bold Headline on Card)
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedCourse.tagline || ''}
+                          onChange={(e) => setSelectedCourse({ ...selectedCourse, tagline: e.target.value })}
+                          className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                          placeholder="e.g. Design with intent."
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Series Header (Top Uppercase Label)
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedCourse.series || ''}
+                          onChange={(e) => setSelectedCourse({ ...selectedCourse, series: e.target.value })}
+                          className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                          placeholder="e.g. THE PRODUCT SERIES"
                         />
                       </div>
 
@@ -860,6 +888,32 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                           value={selectedCourse.slug}
                           onChange={(e) => setSelectedCourse({ ...selectedCourse, slug: e.target.value })}
                           className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Instructor Name
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedCourse.instructor || ''}
+                          onChange={(e) => setSelectedCourse({ ...selectedCourse, instructor: e.target.value })}
+                          className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                          placeholder="e.g. Maya Chen"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Instructor Title / Credentials
+                        </label>
+                        <input
+                          type="text"
+                          value={selectedCourse.instructorTitle || ''}
+                          onChange={(e) => setSelectedCourse({ ...selectedCourse, instructorTitle: e.target.value })}
+                          className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                          placeholder="e.g. Design Partner & Lead Researcher"
                         />
                       </div>
 
@@ -877,7 +931,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                          Price in USD (e.g. $200 = 20000 cents)
+                          Price in USD
                         </label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
@@ -888,6 +942,25 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                             className="w-full text-xs font-medium pl-7 pr-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
                           />
                         </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Course Duration (Hours)
+                        </label>
+                        <input
+                          type="number"
+                          value={selectedCourse.durationHours || 6}
+                          onChange={(e) => {
+                            const hrs = Number(e.target.value) || 1;
+                            setSelectedCourse({
+                              ...selectedCourse,
+                              durationHours: hrs,
+                              totalDuration: `${hrs} hours · ${selectedCourse.lessonCount} lessons`,
+                            });
+                          }}
+                          className="w-full text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                        />
                       </div>
 
                       <div>
@@ -912,6 +985,63 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                             <option value="Advanced">Advanced</option>
                             <option value="All Levels">All Levels</option>
                           </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Badge (Highlight Pill)
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={selectedCourse.badge || ''}
+                            onChange={(e) => setSelectedCourse({ ...selectedCourse, badge: e.target.value })}
+                            className="text-xs font-medium px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                            placeholder="e.g. Bestseller, Highest Rated"
+                          />
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="1"
+                              max="5"
+                              value={selectedCourse.rating || 4.9}
+                              onChange={(e) => setSelectedCourse({ ...selectedCourse, rating: Number(e.target.value) })}
+                              className="w-16 text-xs font-medium px-2 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl"
+                              title="Rating (1.0 to 5.0)"
+                            />
+                            <input
+                              type="number"
+                              value={selectedCourse.reviewCount || 128}
+                              onChange={(e) => setSelectedCourse({ ...selectedCourse, reviewCount: Number(e.target.value) })}
+                              className="flex-1 text-xs font-medium px-2 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl"
+                              title="Review Count"
+                              placeholder="Reviews"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                          Gradient Fallback (From & To Hex)
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={selectedCourse.gradientFrom || '#312e81'}
+                            onChange={(e) => setSelectedCourse({ ...selectedCourse, gradientFrom: e.target.value })}
+                            className="text-xs font-mono px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                            placeholder="#312e81"
+                          />
+                          <input
+                            type="text"
+                            value={selectedCourse.gradientTo || '#6d28d9'}
+                            onChange={(e) => setSelectedCourse({ ...selectedCourse, gradientTo: e.target.value })}
+                            className="text-xs font-mono px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl focus:border-[#4f46e5] focus:outline-none"
+                            placeholder="#6d28d9"
+                          />
                         </div>
                       </div>
 
@@ -1095,40 +1225,63 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                 {selectedCourse ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
                     {/* Thumbnail banner */}
-                    <div className="h-[140px] relative overflow-hidden bg-slate-900 flex flex-col justify-between p-3.5 text-white">
-                      <img
-                        src={selectedCourse.thumbnail}
-                        alt=""
-                        className="absolute inset-0 size-full object-cover opacity-80"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                    <div
+                      className="h-[148px] relative overflow-hidden flex flex-col justify-between p-3.5 text-white"
+                      style={{
+                        background: selectedCourse.thumbnail
+                          ? `url(${selectedCourse.thumbnail}) center / cover no-repeat`
+                          : `linear-gradient(135deg, ${selectedCourse.gradientFrom || '#312e81'}, ${selectedCourse.gradientTo || '#6d28d9'})`,
+                      }}
+                    >
+                      <div className="absolute inset-0 bg-black/40 backdrop-blur-[0.5px]" />
                       <div className="z-10 flex items-center justify-between">
                         <span className="text-[10px] font-extrabold tracking-wider uppercase bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded">
-                          {selectedCourse.category}
+                          {selectedCourse.series || 'THE CAREER SERIES'}
                         </span>
                         <span className="size-6 rounded-md bg-white/20 backdrop-blur-sm flex items-center justify-center">
                           <Lock className="size-3 text-white" />
                         </span>
                       </div>
                       <div className="z-10">
-                        <p className="font-extrabold text-sm line-clamp-1">{selectedCourse.tagline || selectedCourse.title}</p>
-                        <p className="text-[11px] text-white/80 font-medium">{selectedCourse.instructor}</p>
+                        <p className="font-extrabold text-base leading-tight line-clamp-2">
+                          {selectedCourse.tagline || selectedCourse.title}
+                        </p>
                       </div>
                     </div>
 
                     {/* Card Body */}
                     <div className="p-3.5 flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="bg-[#f1f5f9] dark:bg-slate-800 text-[#475569] dark:text-slate-300 font-bold text-[11px] px-2 py-0.5 rounded-full">
+                          {selectedCourse.category}
+                        </span>
+                        <span className="text-amber-500 font-bold text-[11px]">
+                          ★ {selectedCourse.rating || 5.0} <span className="text-slate-400 font-normal">({selectedCourse.reviewCount || 0})</span>
+                        </span>
+                      </div>
+
                       <h4 className="font-bold text-xs text-[#0f172a] dark:text-white line-clamp-2">
                         {selectedCourse.title}
                       </h4>
+
                       <p className="text-[11px] text-slate-500">
-                        {selectedCourse.totalDuration} &bull; {selectedCourse.level}
+                        {selectedCourse.instructor || 'Instructor'} · {selectedCourse.lessonCount || selectedCourse.lessons.length} lessons · {selectedCourse.durationHours || 6} hours
                       </p>
+
+                      <div className="flex items-center gap-1.5">
+                        {selectedCourse.badge && (
+                          <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[10px] px-1.5 py-0.5 rounded">
+                            {selectedCourse.badge}
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-400">{selectedCourse.level}</span>
+                      </div>
+
                       <div className="h-px bg-slate-100 dark:bg-slate-800 my-1" />
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold text-slate-400">Locked state</span>
-                        <span className="font-extrabold text-xs text-[#4f46e5] dark:text-indigo-400">
-                          ${(selectedCourse.priceCents / 100).toFixed(0)} USD
+                        <span className="font-extrabold text-xs text-[#a435f0] dark:text-[#c084fc]">
+                          ${(selectedCourse.priceCents / 100).toFixed(0)} USD →
                         </span>
                       </div>
                     </div>

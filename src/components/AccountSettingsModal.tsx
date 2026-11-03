@@ -27,7 +27,23 @@ export default function AccountSettingsModal() {
     exportUserData,
     deleteAccount,
     openAuthModal,
+    enrolledCourses,
   } = useAuth();
+
+  const [billingCourses, setBillingCourses] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (settingsActiveTab === 'billing') {
+      fetch('/api/courses/public')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.courses) {
+            setBillingCourses(data.courses);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [settingsActiveTab]);
 
   // Profile tab states
   const [fullName, setFullName] = useState('');
@@ -586,33 +602,58 @@ export default function AccountSettingsModal() {
               </div>
             )}
 
-            {/* TAB 3: BILLING & RECEIPTS (Figma 3:120063) */}
+            {/* TAB 3: BILLING & RECEIPTS (Dynamic) */}
             {settingsActiveTab === 'billing' && (
               <div className="bg-white dark:bg-slate-950 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] p-6 flex flex-col gap-5">
-                <h3 className="font-['Plus_Jakarta_Sans'] font-bold text-[#0f172a] dark:text-white text-[20px]">
-                  Billing & receipts
-                </h3>
-
-                <div className="border border-[#e2e8f0] dark:border-slate-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <p className="font-semibold text-[15px] text-[#0f172a] dark:text-white">
-                      Full-Stack Web Development Bootcamp
-                    </p>
-                    <p className="text-xs text-[#475569] dark:text-slate-400">
-                      Order IW-2026-0842 · ₹499.00 INR / $200.00 USD · Paid via Razorpay / Stripe
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      alert('Receipt download generated for InternWala order IW-2026-0842.');
-                    }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4f46e5] hover:underline shrink-0"
-                  >
-                    <span>Download receipt</span>
-                    <ExternalLink className="size-3.5" />
-                  </button>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-['Plus_Jakarta_Sans'] font-bold text-[#0f172a] dark:text-white text-[20px]">
+                    Billing & receipts
+                  </h3>
+                  <span className="text-xs font-semibold text-slate-500">
+                    {enrolledCourses.length} paid invoices
+                  </span>
                 </div>
+
+                {enrolledCourses.length === 0 ? (
+                  <div className="p-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-lg text-slate-400 text-xs">
+                    No purchase receipts found. When you enroll in a course, your tax invoice and receipt will be available here.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    {enrolledCourses.map((courseId) => {
+                      const matched = billingCourses.find((c) => c.id === courseId);
+                      const title = matched ? matched.title : 'Enrolled Course Pathway';
+                      const price = matched ? `$${(matched.priceCents / 100).toFixed(2)} USD` : '$200.00 USD';
+                      const orderId = `IW-${courseId.slice(0, 8).toUpperCase()}`;
+
+                      return (
+                        <div
+                          key={courseId}
+                          className="border border-[#e2e8f0] dark:border-slate-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                        >
+                          <div>
+                            <p className="font-semibold text-[15px] text-[#0f172a] dark:text-white">
+                              {title}
+                            </p>
+                            <p className="text-xs text-[#475569] dark:text-slate-400">
+                              Order {orderId} · {price} · Paid via Secure Checkout
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              alert(`Receipt download generated for InternWala order ${orderId} (${title}).`);
+                            }}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4f46e5] hover:underline shrink-0 cursor-pointer"
+                          >
+                            <span>Download receipt</span>
+                            <ExternalLink className="size-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 

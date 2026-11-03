@@ -27,6 +27,7 @@ interface CoursesGridSectionProps {
   enrolledCourses: string[];
   onEnroll: (courseId: string) => void;
   onNavigateToDashboard: () => void;
+  onNavigateToCourse?: (slug: string) => void;
 }
 
 export default function CoursesGridSection({
@@ -35,6 +36,7 @@ export default function CoursesGridSection({
   enrolledCourses,
   onEnroll,
   onNavigateToDashboard,
+  onNavigateToCourse,
 }: CoursesGridSectionProps) {
   const [wishlistActive, setWishlistActive] = useState<Record<string, boolean>>({});
 
@@ -87,7 +89,8 @@ export default function CoursesGridSection({
                   key={course.id}
                   data-aos="fade-up"
                   data-aos-delay={(idx + 1) * 100}
-                  className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group"
+                  onClick={() => onNavigateToCourse?.(course.slug || course.id)}
+                  className="bg-white dark:bg-slate-900 border border-[#e2e8f0] dark:border-slate-800 rounded-[12px] overflow-hidden shadow-[0px_4px_16px_0px_rgba(15,23,42,0.03)] dark:shadow-none hover:-translate-y-1 transition-all duration-200 flex flex-col select-none relative group cursor-pointer"
                 >
                   {/* Thumbnail banner with Cloudinary format support */}
                   <div
@@ -117,7 +120,11 @@ export default function CoursesGridSection({
                         {course.tagline || course.title}
                       </div>
                       <div className="size-[42px] rounded-[10px] border border-white/40 flex items-center justify-center bg-white/10 backdrop-blur-sm shrink-0">
-                        <img src="/assets/lock.svg" alt="Lock status" className="size-[22px]" />
+                        {isEnrolled ? (
+                          <img src="/assets/sparkles.svg" alt="Unlocked" className="size-[22px]" />
+                        ) : (
+                          <img src="/assets/lock.svg" alt="Lock status" className="size-[22px]" />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -130,7 +137,7 @@ export default function CoursesGridSection({
                           {course.category || 'Professional Skill'}
                         </span>
                         <span className="text-[#b4690e] dark:text-amber-400 text-[12px] font-bold">
-                          ★ {course.rating || '4.9'} <span className="text-slate-400 font-normal">({course.reviewCount || 128})</span>
+                          ★ {course.rating != null ? course.rating : 4.9} <span className="text-slate-400 font-normal">({course.reviewCount != null ? course.reviewCount : 0})</span>
                         </span>
                       </div>
 
@@ -139,13 +146,15 @@ export default function CoursesGridSection({
                       </h3>
 
                       <p className="text-[#475569] dark:text-slate-400 text-[14px]">
-                        {course.instructor || 'Lead Instructor'} · {course.lessonCount || 12} lessons · {course.durationHours || 6} hours
+                        {course.instructor || 'Lead Instructor'} · {course.lessonCount || 1} lessons · {course.durationHours || 6} hours
                       </p>
 
                       <div className="flex items-center gap-2">
-                        <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[11px] px-2 py-0.5 rounded">
-                          {course.badge || 'Bestseller'}
-                        </span>
+                        {course.badge && (
+                          <span className="bg-[#eceb98] text-[#3d3c0a] font-bold text-[11px] px-2 py-0.5 rounded">
+                            {course.badge}
+                          </span>
+                        )}
                         <span className="text-[11px] text-slate-400">{course.level || 'All Levels'}</span>
                       </div>
                     </div>
@@ -161,12 +170,15 @@ export default function CoursesGridSection({
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-[#a435f0] dark:text-[#c084fc] text-[15px]">
-                            ${((course.priceCents || 20000) / 100).toFixed(0)} →
+                            ${((course.priceCents ?? 0) / 100).toFixed(0)} →
                           </span>
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               if (isEnrolled) {
                                 onNavigateToDashboard();
+                              } else if (onNavigateToCourse) {
+                                onNavigateToCourse(course.slug || course.id);
                               } else {
                                 onEnroll(course.id);
                               }
