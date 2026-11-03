@@ -15,6 +15,7 @@ import {
   ListOrdered,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import CourseClassroom from './CourseClassroom';
 
 export interface DashboardCourse {
   id: string;
@@ -78,6 +79,9 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Active classroom state
+  const [activeClassroomCourseId, setActiveClassroomCourseId] = useState<string | null>(null);
 
   // Lesson player interactive preview modal state
   const [activeLessonModal, setActiveLessonModal] = useState<{
@@ -202,6 +206,18 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
   const completedCourses = useMemo(() => {
     return courses.filter((c) => c.progress?.isCompleted || (c.progress?.percent || 0) >= 100);
   }, [courses]);
+
+  if (activeClassroomCourseId) {
+    return (
+      <CourseClassroom
+        courseId={activeClassroomCourseId}
+        onBackToDashboard={() => {
+          setActiveClassroomCourseId(null);
+          fetchDashboardData();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] dark:bg-[#07090e] text-[#0f172a] dark:text-slate-100 font-['Plus_Jakarta_Sans'] pb-20">
@@ -501,13 +517,7 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
 
                           {/* Action Button */}
                           <button
-                            onClick={() => {
-                              setActiveLessonModal({
-                                course,
-                                lessonNumber: currentLessonNum,
-                                lessonTitle: currentLessonTitle,
-                              });
-                            }}
+                            onClick={() => setActiveClassroomCourseId(course.id)}
                             className="w-full bg-[#4f46e5] hover:bg-[#4338ca] text-white font-bold text-xs py-2.5 px-4 rounded-xl transition inline-flex items-center justify-center gap-2 shadow-xs cursor-pointer"
                           >
                             <Play className="size-3.5 fill-white" />
@@ -641,16 +651,7 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
                               )}
 
                               <button
-                                onClick={() => {
-                                  setActiveLessonModal({
-                                    course,
-                                    lessonNumber: course.progress?.lastOpenedLessonNumber || 1,
-                                    lessonTitle:
-                                      course.progress?.lastOpenedLessonTitle ||
-                                      course.lessons?.[0]?.title ||
-                                      'Lesson 1',
-                                  });
-                                }}
+                                onClick={() => setActiveClassroomCourseId(course.id)}
                                 className="text-xs font-bold px-3.5 py-1.5 rounded-lg bg-[#2d2f31] dark:bg-white text-white dark:text-[#2d2f31] hover:bg-black dark:hover:bg-slate-200 transition inline-flex items-center gap-1.5 cursor-pointer"
                               >
                                 <ListOrdered className="size-3.5" />

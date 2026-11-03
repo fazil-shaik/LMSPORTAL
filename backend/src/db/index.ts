@@ -22,7 +22,14 @@ export async function ensureDatabaseSchema(sql: any): Promise<void> {
       END $$;
     `;
 
-    // 2. Ensure courses table has all columns
+    // 2. Ensure courses table has all columns matching PDF Section 3 & 11
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS subtitle TEXT;`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS banner TEXT;`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS preview_video TEXT;`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS content_version INTEGER DEFAULT 1;`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS published_time TIMESTAMP;`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Engineering';`;
+    await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;`;
     await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS series VARCHAR(255) DEFAULT 'THE CAREER SERIES';`;
     await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS tagline VARCHAR(255) DEFAULT 'Build practical mastery.';`;
     await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS instructor VARCHAR(255) DEFAULT 'Lead Instructor';`;
@@ -41,50 +48,216 @@ export async function ensureDatabaseSchema(sql: any): Promise<void> {
     await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS gradient_from VARCHAR(20) DEFAULT '#312e81';`;
     await sql`ALTER TABLE courses ADD COLUMN IF NOT EXISTS gradient_to VARCHAR(20) DEFAULT '#6d28d9';`;
 
-    // 3. Ensure lessons table has all columns
-    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS video_url TEXT;`;
-    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS duration VARCHAR(50) DEFAULT '25 min';`;
-    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_free_preview BOOLEAN DEFAULT false;`;
-    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS resources JSONB DEFAULT '[]'::jsonb;`;
-
-    // 4. Ensure purchases table has all columns
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS order_id VARCHAR(255);`;
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_session_id VARCHAR(255);`;
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50);`;
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS discount_amount INTEGER DEFAULT 0;`;
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS tax_amount INTEGER DEFAULT 0;`;
-    await sql`ALTER TABLE purchases ADD COLUMN IF NOT EXISTS receipt_url TEXT;`;
-
-    // 5. Ensure coupons table exists
+    // 3. Modules table (PDF Section 4 & 11)
     await sql`
-      CREATE TABLE IF NOT EXISTS coupons (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        code VARCHAR(50) NOT NULL UNIQUE,
-        discount_percent INTEGER NOT NULL DEFAULT 0,
-        discount_amount_cents INTEGER NOT NULL DEFAULT 0,
-        active BOOLEAN NOT NULL DEFAULT true,
-        valid_until TIMESTAMP,
-        max_uses INTEGER NOT NULL DEFAULT 100,
-        times_used INTEGER NOT NULL DEFAULT 0,
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
-      );
-    `;
-
-    // 6. Ensure course_reviews table exists
-    await sql`
-      CREATE TABLE IF NOT EXISTS course_reviews (
+      CREATE TABLE IF NOT EXISTS modules (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         course_id UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-        student_name VARCHAR(255) NOT NULL,
-        student_role VARCHAR(255),
-        rating INTEGER NOT NULL,
-        review_text TEXT NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        objectives JSONB DEFAULT '[]'::jsonb,
+        position INTEGER NOT NULL DEFAULT 1,
+        completion_rule VARCHAR(50) NOT NULL DEFAULT 'all_lessons',
+        unlock_rule VARCHAR(50) NOT NULL DEFAULT 'open',
+        status VARCHAR(20) NOT NULL DEFAULT 'published',
+        archived BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 4. Module Timelines table (PDF Section 5 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS module_timelines (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        module_id UUID NOT NULL UNIQUE REFERENCES modules(id) ON DELETE CASCADE,
+        label VARCHAR(100) DEFAULT 'Week 1',
+        suggested_duration VARCHAR(100) DEFAULT '3 days',
+        start_offset_days INTEGER NOT NULL DEFAULT 1,
+        release_mode VARCHAR(20) NOT NULL DEFAULT 'self_paced',
+        release_after_days INTEGER NOT NULL DEFAULT 0,
+        buffer_minutes INTEGER NOT NULL DEFAULT 0,
+        estimated_study_time_minutes INTEGER NOT NULL DEFAULT 60,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 5. Lessons table (PDF Section 4.1 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS lessons (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        module_id UUID REFERENCES modules(id) ON DELETE CASCADE,
+        section_id UUID,
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        type VARCHAR(50) NOT NULL DEFAULT 'video',
+        article_body TEXT DEFAULT '',
+        media_asset_id VARCHAR(255),
+        media_url TEXT,
+        video_url TEXT,
+        video_asset_id VARCHAR(255),
+        duration VARCHAR(50) DEFAULT '15 min',
+        duration_formatted VARCHAR(50) DEFAULT '15 min',
+        duration_seconds INTEGER NOT NULL DEFAULT 900,
+        position INTEGER NOT NULL DEFAULT 1,
+        "order" INTEGER NOT NULL DEFAULT 1,
+        is_free_preview BOOLEAN NOT NULL DEFAULT false,
+        is_required BOOLEAN NOT NULL DEFAULT true,
+        status VARCHAR(20) NOT NULL DEFAULT 'published',
+        archived BOOLEAN NOT NULL DEFAULT false,
+        resources JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // Ensure lessons has all new columns
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS module_id UUID REFERENCES modules(id) ON DELETE CASCADE;`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS article_body TEXT DEFAULT '';`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS media_asset_id VARCHAR(255);`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS media_url TEXT;`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS duration_formatted VARCHAR(50) DEFAULT '15 min';`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 1;`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS is_required BOOLEAN DEFAULT true;`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'published';`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false;`;
+
+    // 6. Media Assets table (PDF Section 10 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS media_assets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        public_id VARCHAR(255) NOT NULL,
+        resource_type VARCHAR(50) NOT NULL DEFAULT 'image',
+        delivery_type VARCHAR(50) NOT NULL DEFAULT 'public',
+        format VARCHAR(50),
+        duration INTEGER,
+        bytes INTEGER,
+        version VARCHAR(50),
+        uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `;
 
-    console.log('[Neon PostgreSQL] Schema auto-migrated successfully (all columns verified).');
+    // 7. Lesson Resources table (PDF Section 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS lesson_resources (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        lesson_id UUID REFERENCES lessons(id) ON DELETE CASCADE,
+        module_id UUID REFERENCES modules(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        media_asset_id VARCHAR(255),
+        url TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 8. Quizzes table (PDF Section 6 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS quizzes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        module_id UUID NOT NULL UNIQUE REFERENCES modules(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        instructions TEXT DEFAULT '',
+        is_required BOOLEAN NOT NULL DEFAULT false,
+        passing_percent INTEGER NOT NULL DEFAULT 70,
+        time_limit_minutes INTEGER NOT NULL DEFAULT 0,
+        attempts_allowed INTEGER NOT NULL DEFAULT 0,
+        shuffle_questions BOOLEAN NOT NULL DEFAULT false,
+        shuffle_options BOOLEAN NOT NULL DEFAULT false,
+        show_results_mode VARCHAR(50) NOT NULL DEFAULT 'score_and_correct',
+        unlock_next BOOLEAN NOT NULL DEFAULT false,
+        pool_size INTEGER NOT NULL DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'published',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 9. Quiz Questions table (PDF Section 6.2 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS quiz_questions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL DEFAULT 'single_choice',
+        question_text TEXT NOT NULL,
+        image_url TEXT,
+        explanation TEXT DEFAULT '',
+        points INTEGER NOT NULL DEFAULT 1,
+        position INTEGER NOT NULL DEFAULT 1,
+        accepted_short_answers JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 10. Quiz Options table (PDF Section 6.2 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS quiz_options (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        question_id UUID NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+        option_text TEXT NOT NULL,
+        is_correct BOOLEAN NOT NULL DEFAULT false,
+        position INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 11. Module Progress table (PDF Section 7.2 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS module_progress (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        module_id UUID NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
+        percent INTEGER NOT NULL DEFAULT 0,
+        status VARCHAR(50) NOT NULL DEFAULT 'not_started',
+        started_time TIMESTAMP,
+        completed_time TIMESTAMP,
+        unlocked_time TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 12. Quiz Attempts table (PDF Section 6.3 & 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS quiz_attempts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        quiz_id UUID NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+        attempt_number INTEGER NOT NULL DEFAULT 1,
+        score_percent INTEGER NOT NULL DEFAULT 0,
+        passed BOOLEAN NOT NULL DEFAULT false,
+        started_time TIMESTAMP NOT NULL DEFAULT NOW(),
+        submitted_time TIMESTAMP,
+        time_taken_seconds INTEGER NOT NULL DEFAULT 0,
+        saved_answers JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 13. Quiz Attempt Answers table (PDF Section 11)
+    await sql`
+      CREATE TABLE IF NOT EXISTS quiz_attempt_answers (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        attempt_id UUID NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE,
+        question_id UUID NOT NULL REFERENCES quiz_questions(id) ON DELETE CASCADE,
+        selected_option_ids JSONB DEFAULT '[]'::jsonb,
+        is_correct BOOLEAN NOT NULL DEFAULT false,
+        points_earned INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `;
+
+    // 14. Add any missing columns to enrollments, purchases, coupons, reviews
+    await sql`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS completed_date TIMESTAMP;`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS time_watched INTEGER DEFAULT 0;`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS current_lesson_id UUID;`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'not_started';`;
+
+    console.log('[Neon PostgreSQL] Schema auto-migrated successfully (all LMS course structure tables & columns verified).');
   } catch (err: any) {
     console.warn('[Neon PostgreSQL] Schema auto-migration warning:', err?.message || err);
   }
@@ -97,8 +270,10 @@ try {
     dbInstance = drizzle(sql, { schema });
     isDatabaseConnected = true;
     console.log('Neon Database HTTP Client initialized with Drizzle ORM');
-    // Run idempotent schema auto-migration
-    schemaSyncPromise = ensureDatabaseSchema(sql);
+    // Run idempotent schema auto-migration with error handler
+    schemaSyncPromise = ensureDatabaseSchema(sql).catch((err) => {
+      console.warn('Neon connection or schema sync notice:', err?.message || err);
+    });
   } else {
     console.warn('Neon DATABASE_URL not set or using placeholder. Running in fallback mode.');
   }

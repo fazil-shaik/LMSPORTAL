@@ -6,11 +6,30 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { db, schema, isDatabaseConnected, rawSql, schemaSyncPromise, ensureDatabaseSchema } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
+import { generateSignedDeliveryUrl } from '../services/cloudinary.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../data');
+
+const getPersistentDataDir = () => {
+  const candidates = [
+    path.resolve(process.cwd(), 'backend/src/data'),
+    path.resolve(process.cwd(), 'src/data'),
+    path.resolve(__dirname, '../data'),
+    path.resolve(__dirname, '../../src/data'),
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(cand)) return cand;
+  }
+  const fallback = path.resolve(__dirname, '../data');
+  if (!fs.existsSync(fallback)) fs.mkdirSync(fallback, { recursive: true });
+  return fallback;
+};
+
+const DATA_DIR = getPersistentDataDir();
 const COURSES_FILE = path.join(DATA_DIR, 'courses.json');
+const PROGRESS_FILE = path.join(DATA_DIR, 'progress.json');
+const ENROLLMENTS_FILE = path.join(DATA_DIR, 'enrollments.json');
 
 const router = Router();
 
@@ -19,50 +38,137 @@ export function isValidUUID(id: any): boolean {
   return typeof id === 'string' && UUID_REGEX.test(id.trim());
 }
 
+// -------------------------------------------------------------
+// Type Definitions matching PDF Section 2, 3, 4, 5, 6, 11
+// -------------------------------------------------------------
+
+export interface QuizOptionData {
+  id: string;
+  optionText: string;
+  isCorrect: boolean;
+  position: number;
+}
+
+export interface QuizQuestionData {
+  id: string;
+  type: 'single_choice' | 'multiple_choice' | 'true_false' | 'short_text';
+  questionText: string;
+  imageUrl?: string;
+  explanation: string;
+  points: number;
+  position: number;
+  options: QuizOptionData[];
+  acceptedShortAnswers?: string[];
+}
+
+export interface QuizData {
+  id: string;
+  moduleId: string;
+  title: string;
+  instructions: string;
+  isRequired: boolean;
+  passingPercent: number;
+  timeLimitMinutes: number; // 0 = unlimited
+  attemptsAllowed: number; // 0 = unlimited
+  shuffleQuestions: boolean;
+  shuffleOptions: boolean;
+  showResultsMode: 'score_only' | 'score_and_correct' | 'score_and_explanations';
+  unlockNext: boolean;
+  poolSize: number;
+  status: 'draft' | 'published';
+  questions: QuizQuestionData[];
+}
+
+export interface LessonData {
+  id: string;
+  moduleId: string;
+  title: string;
+  description: string;
+  type: 'video' | 'audio' | 'article' | 'resource';
+  articleBody?: string;
+  mediaAssetId?: string;
+  mediaUrl?: string;
+  videoUrl?: string;
+  duration: string;
+  durationSeconds: number;
+  position: number;
+  isFreePreview: boolean;
+  isRequired: boolean; // Optional lessons do not count toward completion %
+  status: 'draft' | 'published';
+  archived: boolean;
+  resources?: Array<{ name: string; url: string; size?: string; type?: string }>;
+}
+
+export interface ModuleTimelineData {
+  id: string;
+  moduleId: string;
+  label: string; // e.g. "Week 1", "Phase 1"
+  suggestedDuration: string; // e.g. "3 days", "1 week"
+  startOffsetDays: number; // e.g. 1, 8, 15
+  releaseMode: 'self_paced' | 'scheduled';
+  releaseAfterDays: number;
+  bufferMinutes: number;
+  estimatedStudyTimeMinutes: number; // Calculated automatically
+}
+
+export interface ModuleData {
+  id: string;
+  courseId: string;
+  title: string;
+  description: string;
+  objectives: string[];
+  position: number;
+  completionRule: 'all_lessons' | 'all_lessons_plus_quiz';
+  unlockRule: 'open' | 'previous_completed' | 'scheduled';
+  status: 'draft' | 'published';
+  archived: boolean;
+  timeline: ModuleTimelineData;
+  lessons: LessonData[];
+  quiz?: QuizData;
+}
+
 export interface CourseData {
   id: string;
   slug: string;
   title: string;
-  description: string;
-  instructor: string;
-  instructorTitle: string;
-  thumbnail: string;
+  subtitle: string; // One line promise
+  description: string; // Rich text
+  thumbnail: string; // Cloudinary
+  banner?: string; // Cloudinary
+  previewVideo?: string; // Cloudinary
   priceCents: number;
   currency: string;
   category: string;
-  level: string;
-  durationHours: number;
-  totalDuration: string;
-  lessonCount: number;
-  rating: number;
-  reviewCount: number;
+  tags: string[];
+  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  language: string;
+  status: 'draft' | 'published' | 'archived';
+  contentVersion: number;
+  publishedTime?: string;
   series: string;
   tagline: string;
+  instructor: string;
+  instructorTitle: string;
+  instructorBio: string;
+  instructorAvatar: string;
+  lastUpdatedDate: string;
   badge?: string;
-  status?: 'published' | 'draft';
-  outcomes?: string[];
-  requirements?: string[];
-  whoIsItFor?: string[];
-  instructorBio?: string;
-  instructorAvatar?: string;
-  language?: string;
-  lastUpdatedDate?: string;
+  rating: number;
+  reviewCount: number;
+  outcomes: string[];
+  requirements: string[];
+  whoIsItFor: string[];
+  totalDuration: string; // Derived from modules & lessons
+  durationHours: number;
+  lessonCount: number; // Derived
+  moduleCount: number; // Derived
   gradientFrom: string;
   gradientTo: string;
   accentColor: string;
-  sections?: Array<{
-    id: string;
-    title: string;
-    order: number;
-    lessons: Array<{
-      id: string;
-      title: string;
-      lessonNumber: number;
-      duration: string;
-      isFreePreview?: boolean;
-      videoUrl?: string;
-    }>;
-  }>;
+  modules: ModuleData[];
+  // Legacy compatibility fields
+  lessons?: any[];
+  sections?: any[];
   reviews?: Array<{
     id: string;
     studentName: string;
@@ -71,167 +177,812 @@ export interface CourseData {
     reviewText: string;
     date: string;
   }>;
-  lessons: Array<{
-    id: string;
-    title: string;
-    lessonNumber: number;
-    duration: string;
-    videoAssetId?: string;
-    videoUrl?: string;
-    isFreePreview?: boolean;
-    sectionTitle?: string;
-    resources?: Array<{ name: string; url: string; size?: string }>;
-  }>;
 }
 
-// Initial seed courses as defined in Figma (Frames 3:117751, 3:118064) and PRD
+// -------------------------------------------------------------
+// Seed Courses with multi-module, lesson & quiz hierarchy
+// -------------------------------------------------------------
+
+function calculateCourseTotals(course: CourseData): void {
+  let totalSeconds = 0;
+  let totalLessons = 0;
+  let activeModules = 0;
+
+  for (const mod of course.modules) {
+    if (mod.archived) continue;
+    activeModules++;
+    let modSeconds = 0;
+    for (const les of mod.lessons) {
+      if (les.archived) continue;
+      totalLessons++;
+      modSeconds += les.durationSeconds || 900;
+    }
+    // Module timeline estimated study time: lessons duration + buffer
+    const quizSeconds = mod.quiz ? (mod.quiz.timeLimitMinutes > 0 ? mod.quiz.timeLimitMinutes * 60 : 600) : 0;
+    const bufferSec = (mod.timeline?.bufferMinutes || 0) * 60;
+    if (mod.timeline) {
+      mod.timeline.estimatedStudyTimeMinutes = Math.max(15, Math.round((modSeconds + quizSeconds + bufferSec) / 60));
+    }
+    totalSeconds += modSeconds + quizSeconds;
+  }
+
+  course.moduleCount = activeModules;
+  course.lessonCount = totalLessons;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.round((totalSeconds % 3600) / 60);
+  course.durationHours = Math.max(1, Math.round(totalSeconds / 3600));
+  course.totalDuration = hours > 0 ? `${hours} hr ${minutes > 0 ? minutes + ' min' : ''} · ${totalLessons} lessons` : `${minutes} min · ${totalLessons} lessons`;
+}
+
 const initialCoursesSeed: CourseData[] = [
   {
     id: 'c1111111-1111-1111-1111-111111111111',
     slug: 'product-design-insight-to-impact',
     title: 'Product Design, from insight to impact',
-    description: 'A comprehensive, hands-on journey through product design, research, interaction, and design systems.',
+    subtitle: 'From user discovery to production-ready design tokens and interactive systems',
+    description: 'A comprehensive, hands-on masterclass following the modern product development workflow used at Stripe, Figma, and Airbnb. Master qualitative user interviews, opportunity solution trees, component architecture, WCAG 2.1 AA accessibility, and enterprise design tokens.',
     instructor: 'Maya Chen',
     instructorTitle: 'Design Partner & Lead Researcher',
+    instructorBio: 'Former design systems lead at Stripe, helping over 5,000+ designers and engineers bridge research insights to world-class software.',
+    instructorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
     thumbnail: 'https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?auto=format&fit=crop&w=700&q=80',
-    priceCents: 20000, // $200 USD / ₹499 INR
+    banner: 'https://images.unsplash.com/photo-1581291518857-4e27b48ff24e?auto=format&fit=crop&w=1200&q=80',
+    previewVideo: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    priceCents: 20000,
     currency: 'USD',
     category: 'Product design',
+    tags: ['Design Systems', 'Figma', 'UX Research', 'Tokens'],
     level: 'Beginner',
-    durationHours: 6,
-    totalDuration: '6 hours · 12 lessons',
-    lessonCount: 12,
-    rating: 4.9,
-    reviewCount: 128,
+    language: 'English',
+    status: 'published',
+    contentVersion: 1,
+    publishedTime: new Date().toISOString(),
     series: 'THE PRODUCT SERIES',
     tagline: 'Design with intent.',
     badge: 'Bestseller',
+    rating: 4.9,
+    reviewCount: 128,
+    outcomes: [
+      'Master the double diamond UX discovery process and conduct user interviews',
+      'Synthesize customer interviews into actionable Opportunity Solution Trees',
+      'Build scalable multi-brand design systems in Figma with tokens and variables',
+      'Conduct usability tests and cognitive walkthroughs with real test users',
+      'Deliver production-ready handoff specs to engineering teams with zero friction'
+    ],
+    requirements: [
+      'A computer with modern web browser and free Figma account',
+      'Curiosity for user research and intuitive product problem-solving',
+      'No prior graphic design or coding experience required'
+    ],
+    whoIsItFor: [
+      'Aspiring product designers wanting a verified, job-ready portfolio project',
+      'Engineers and product managers looking to level up their design intuition',
+      'Designers wanting to transition from freelance graphics to scalable tech systems'
+    ],
+    totalDuration: '6 hours · 12 lessons',
+    durationHours: 6,
+    lessonCount: 12,
+    moduleCount: 3,
     gradientFrom: '#312e81',
     gradientTo: '#6d28d9',
     accentColor: '#4f46e5',
-    lessons: [
-      { id: 'l1', title: 'Research foundations & active listening', lessonNumber: 1, duration: '28 min' },
-      { id: 'l2', title: 'Synthesizing qualitative customer interviews', lessonNumber: 2, duration: '32 min' },
-      { id: 'l3', title: 'Framing opportunity problem statements', lessonNumber: 3, duration: '25 min' },
-      { id: 'l4', title: 'Information architecture & wireframing', lessonNumber: 4, duration: '35 min' },
-      { id: 'l5', title: 'Figma components & scalable design tokens', lessonNumber: 5, duration: '40 min' },
-      { id: 'l6', title: 'Turning insights into opportunities', lessonNumber: 6, duration: '34 min' },
-      { id: 'l7', title: 'Interactive prototyping & micro-interactions', lessonNumber: 7, duration: '30 min' },
-      { id: 'l8', title: 'Usability testing & cognitive walkthroughs', lessonNumber: 8, duration: '26 min' },
-      { id: 'l9', title: 'Design system governance & handoff', lessonNumber: 9, duration: '36 min' },
-      { id: 'l10', title: 'Accessibility (WCAG 2.1 AA) in practice', lessonNumber: 10, duration: '29 min' },
-      { id: 'l11', title: 'Building your portfolio case study', lessonNumber: 11, duration: '35 min' },
-      { id: 'l12', title: 'Internship readiness & live capstone review', lessonNumber: 12, duration: '40 min' },
-    ],
-  },
-  {
-    id: 'c2222222-2222-2222-2222-222222222222',
-    slug: 'systems-thinking-for-product-teams',
-    title: 'Systems thinking for product teams',
-    description: 'Learn to see second-order effects, build resilient feedback loops, and architect software and products that scale.',
-    instructor: 'Jordan Lee',
-    instructorTitle: 'Principal Systems Architect',
-    thumbnail: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=700&q=80',
-    priceCents: 20000,
-    currency: 'USD',
-    category: 'Product strategy',
-    level: 'Intermediate',
-    durationHours: 6,
-    totalDuration: '6 hours · 12 lessons',
-    lessonCount: 12,
-    rating: 4.9,
-    reviewCount: 128,
-    series: 'THE STRATEGY SERIES',
-    tagline: 'Think in systems.',
-    badge: 'Highest Rated',
-    gradientFrom: '#0f766e',
-    gradientTo: '#115e59',
-    accentColor: '#0f766e',
-    lessons: [
-      { id: 'l2-1', title: 'Foundations of systems thinking', lessonNumber: 1, duration: '25 min' },
-      { id: 'l2-2', title: 'Mapping causal loops and stock-flow diagrams', lessonNumber: 2, duration: '30 min' },
-      { id: 'l2-3', title: 'Identifying leverage points in product ecosystems', lessonNumber: 3, duration: '35 min' },
-      { id: 'l2-4', title: 'Managing technical and organizational debt', lessonNumber: 4, duration: '28 min' },
-      { id: 'l2-5', title: 'Resilience engineering & fault-tolerant architectures', lessonNumber: 5, duration: '40 min' },
-      { id: 'l2-6', title: 'Designing feedback loops for continuous learning', lessonNumber: 6, duration: '32 min' },
-      { id: 'l2-7', title: 'System dynamics modeling with real-world cases', lessonNumber: 7, duration: '38 min' },
-      { id: 'l2-8', title: 'Strategic roadmapping and trade-off analysis', lessonNumber: 8, duration: '27 min' },
-      { id: 'l2-9', title: 'Scaling distributed teams and autonomous pods', lessonNumber: 9, duration: '33 min' },
-      { id: 'l2-10', title: 'Platform thinking vs feature factories', lessonNumber: 10, duration: '31 min' },
-      { id: 'l2-11', title: 'Measuring systemic health and vitality metrics', lessonNumber: 11, duration: '29 min' },
-      { id: 'l2-12', title: 'Capstone strategy presentation & defense', lessonNumber: 12, duration: '45 min' },
-    ],
-  },
-  {
-    id: 'c3333333-3333-3333-3333-333333333333',
-    slug: 'build-a-brand-people-believe-in',
-    title: 'Build a brand people believe in',
-    description: 'Develop distinctive identities, articulate company narratives, and design visual languages with resonance.',
-    instructor: 'Jordan Lee',
-    instructorTitle: 'Creative Director & Founder',
-    thumbnail: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=700&q=80',
-    priceCents: 20000,
-    currency: 'USD',
-    category: 'Brand design',
-    level: 'All Levels',
-    durationHours: 6,
-    totalDuration: '6 hours · 12 lessons',
-    lessonCount: 12,
-    rating: 4.9,
-    reviewCount: 128,
-    series: 'THE CREATIVE SERIES',
-    tagline: 'Make it meaningful.',
-    badge: 'Bestseller',
-    gradientFrom: '#7c2d12',
-    gradientTo: '#b45309',
-    accentColor: '#b45309',
-    lessons: [
-      { id: 'l3-1', title: 'The anatomy of enduring brands', lessonNumber: 1, duration: '24 min' },
-      { id: 'l3-2', title: 'Defining brand purpose, vision, and core values', lessonNumber: 2, duration: '30 min' },
-      { id: 'l3-3', title: 'Audience psychology & emotional connection', lessonNumber: 3, duration: '33 min' },
-      { id: 'l3-4', title: 'Visual identity: typography, color, and form', lessonNumber: 4, duration: '38 min' },
-      { id: 'l3-5', title: 'Brand voice, tone, and editorial guidelines', lessonNumber: 5, duration: '29 min' },
-      { id: 'l3-6', title: 'Designing cohesive brand collateral & assets', lessonNumber: 6, duration: '35 min' },
-      { id: 'l3-7', title: 'Storytelling across multi-channel customer journeys', lessonNumber: 7, duration: '32 min' },
-      { id: 'l3-8', title: 'Brand guidelines & design system synchronization', lessonNumber: 8, duration: '40 min' },
-      { id: 'l3-9', title: 'Executing memorable brand launch campaigns', lessonNumber: 9, duration: '28 min' },
-      { id: 'l3-10', title: 'Brand equity monitoring & reputation management', lessonNumber: 10, duration: '26 min' },
-      { id: 'l3-11', title: 'Rebranding strategies: evolution vs revolution', lessonNumber: 11, duration: '34 min' },
-      { id: 'l3-12', title: 'Comprehensive brand book portfolio project', lessonNumber: 12, duration: '42 min' },
+    lastUpdatedDate: 'November 2026',
+    modules: [
+      {
+        id: 'm1-c1',
+        courseId: 'c1111111-1111-1111-1111-111111111111',
+        title: 'Module 1: Foundations & Discovery Research',
+        description: 'Understand the foundational mental models of user research, interviewing strategies, and synthesis methods.',
+        objectives: [
+          'Master qualitative interviewing techniques',
+          'Avoid leading questions and extract honest feedback',
+          'Frame clear problem statements'
+        ],
+        position: 1,
+        completionRule: 'all_lessons_plus_quiz',
+        unlockRule: 'open',
+        status: 'published',
+        archived: false,
+        timeline: {
+          id: 't1-c1',
+          moduleId: 'm1-c1',
+          label: 'Week 1',
+          suggestedDuration: '4 days',
+          startOffsetDays: 1,
+          releaseMode: 'self_paced',
+          releaseAfterDays: 0,
+          bufferMinutes: 30,
+          estimatedStudyTimeMinutes: 140,
+        },
+        lessons: [
+          {
+            id: 'l1-1',
+            moduleId: 'm1-c1',
+            title: 'Research foundations & active listening',
+            description: 'Core listening principles and setting up high-signal user interviews.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+            duration: '28 min',
+            durationSeconds: 1680,
+            position: 1,
+            isFreePreview: true,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+            resources: [
+              { name: 'User Interview Script Template.pdf', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', size: '240 KB', type: 'pdf' }
+            ],
+          },
+          {
+            id: 'l1-2',
+            moduleId: 'm1-c1',
+            title: 'Synthesizing qualitative customer interviews',
+            description: 'Affinity mapping and transforming raw video notes into atomic user insights.',
+            type: 'article',
+            articleBody: `# Synthesizing Qualitative Interviews\n\nWhen reviewing recorded customer conversations, avoid summarizing what the user *said* verbatim. Instead, look for underlying emotional drivers and workarounds.\n\n### The 3-Bucket Technique\n1. **Pains**: Unmet expectations, friction points, delays.\n2. **Gains**: Delighters and high-efficiency shortcuts.\n3. **Hacks**: Things the customer does outside software to get the job done (spreadsheets, sticky notes, Slack bots).\n\nKeep note cards atomic: one insight per card.`,
+            duration: '20 min',
+            durationSeconds: 1200,
+            position: 2,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l1-3',
+            moduleId: 'm1-c1',
+            title: 'Framing opportunity problem statements',
+            description: 'Writing "How Might We" statements that empower creative team solutions.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+            duration: '25 min',
+            durationSeconds: 1500,
+            position: 3,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l1-4',
+            moduleId: 'm1-c1',
+            title: 'Foundations Reference Checklist & Resources',
+            description: 'Downloadable templates, Figma UI starter kits, and interview rubrics.',
+            type: 'resource',
+            duration: '15 min',
+            durationSeconds: 900,
+            position: 4,
+            isFreePreview: false,
+            isRequired: false, // Optional resource
+            status: 'published',
+            archived: false,
+            resources: [
+              { name: 'Double Diamond UX Discovery Guide.pdf', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', size: '1.2 MB', type: 'pdf' }
+            ],
+          },
+        ],
+        quiz: {
+          id: 'q1-c1',
+          moduleId: 'm1-c1',
+          title: 'Module 1 Assessment: UX Foundations & Discovery',
+          instructions: 'Verify your understanding of interview methodologies, affinity mapping, and problem framing. You must score at least 70% to complete this module.',
+          isRequired: true,
+          passingPercent: 70,
+          timeLimitMinutes: 15,
+          attemptsAllowed: 3,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          showResultsMode: 'score_and_correct',
+          unlockNext: true,
+          poolSize: 0,
+          status: 'published',
+          questions: [
+            {
+              id: 'q1-c1-1',
+              type: 'single_choice',
+              questionText: 'What is the primary danger of asking "Would you pay for a feature that does X?" during user interviews?',
+              explanation: 'Hypothetical questions invite polite, speculative agreement rather than factual past behavior.',
+              points: 2,
+              position: 1,
+              options: [
+                { id: 'opt-1-1', optionText: 'It asks for speculative future prediction rather than validated past behavior', isCorrect: true, position: 1 },
+                { id: 'opt-1-2', optionText: 'It takes too long to explain pricing structures', isCorrect: false, position: 2 },
+                { id: 'opt-1-3', optionText: 'Customers never understand product features', isCorrect: false, position: 3 },
+                { id: 'opt-1-4', optionText: 'It violates the double diamond framework', isCorrect: false, position: 4 },
+              ],
+            },
+            {
+              id: 'q1-c1-2',
+              type: 'multiple_choice',
+              questionText: 'Which of the following are valid components of an atomic user insight? (Select all that apply)',
+              explanation: 'Atomic insights require observable context, customer rationale, and friction intensity.',
+              points: 2,
+              position: 2,
+              options: [
+                { id: 'opt-2-1', optionText: 'The user context and scenario in which friction occurred', isCorrect: true, position: 1 },
+                { id: 'opt-2-2', optionText: 'The current workaround the customer uses', isCorrect: true, position: 2 },
+                { id: 'opt-2-3', optionText: 'A direct UI redesign sketch from the engineer', isCorrect: false, position: 3 },
+                { id: 'opt-2-4', optionText: 'The underlying motivation or emotional driver', isCorrect: true, position: 4 },
+              ],
+            },
+            {
+              id: 'q1-c1-3',
+              type: 'true_false',
+              questionText: 'In qualitative discovery, an affinity map should strictly group notes by pre-existing product categories rather than emergent user behaviors.',
+              explanation: 'False: Grouping by pre-existing product tabs blinds you to emergent workflows and novel cross-cutting problems.',
+              points: 1,
+              position: 3,
+              options: [
+                { id: 'opt-3-1', optionText: 'True', isCorrect: false, position: 1 },
+                { id: 'opt-3-2', optionText: 'False', isCorrect: true, position: 2 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'm2-c1',
+        courseId: 'c1111111-1111-1111-1111-111111111111',
+        title: 'Module 2: Architecture, Wireframing & Design Tokens',
+        description: 'Transition from wireframes into scalable design tokens, Figma auto-layout, and reusable UI components.',
+        objectives: [
+          'Design scalable wireframes with autolayout',
+          'Implement color, spacing, and typography tokens',
+          'Structure WCAG 2.1 AA accessible component states'
+        ],
+        position: 2,
+        completionRule: 'all_lessons_plus_quiz',
+        unlockRule: 'previous_completed',
+        status: 'published',
+        archived: false,
+        timeline: {
+          id: 't2-c1',
+          moduleId: 'm2-c1',
+          label: 'Week 2',
+          suggestedDuration: '5 days',
+          startOffsetDays: 5,
+          releaseMode: 'self_paced',
+          releaseAfterDays: 0,
+          bufferMinutes: 45,
+          estimatedStudyTimeMinutes: 180,
+        },
+        lessons: [
+          {
+            id: 'l2-1',
+            moduleId: 'm2-c1',
+            title: 'Information architecture & wireframing',
+            description: 'Building low-fidelity structural maps and tree testing your navigation hierarchy.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+            duration: '35 min',
+            durationSeconds: 2100,
+            position: 1,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l2-2',
+            moduleId: 'm2-c1',
+            title: 'Figma components & scalable design tokens',
+            description: 'Naming conventions, aliasing tokens, semantic themes, and variant properties.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            duration: '40 min',
+            durationSeconds: 2400,
+            position: 2,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l2-3',
+            moduleId: 'm2-c1',
+            title: 'Design token architecture in code and Figma',
+            description: 'Deep dive into JSON token formats and synchronizing tokens with Style Dictionary.',
+            type: 'article',
+            articleBody: `# Design Tokens: From Figma Variables to Code\n\nTokens are the single source of truth for all visual primitives across iOS, Android, and Web.\n\n### The Three Token Tiers\n- **Global Primitive Tokens**: \`color.blue.500 = #3b82f6\`\n- **Semantic / Alias Tokens**: \`color.brand.primary = {color.blue.500}\`\n- **Component Scoped Tokens**: \`button.primary.background = {color.brand.primary}\`\n\nAlways bind UI components to semantic or component tokens, never raw global hex codes!`,
+            duration: '25 min',
+            durationSeconds: 1500,
+            position: 3,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l2-4',
+            moduleId: 'm2-c1',
+            title: 'Accessibility (WCAG 2.1 AA) in practice',
+            description: 'Contrast calculations, keyboard focus indicators, screen reader labeling, and touch targets.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+            duration: '29 min',
+            durationSeconds: 1740,
+            position: 4,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+        ],
+        quiz: {
+          id: 'q2-c1',
+          moduleId: 'm2-c1',
+          title: 'Module 2 Quiz: Design Systems & Tokens',
+          instructions: 'Test your understanding of semantic token hierarchies and accessibility standards.',
+          isRequired: true,
+          passingPercent: 70,
+          timeLimitMinutes: 10,
+          attemptsAllowed: 3,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          showResultsMode: 'score_and_correct',
+          unlockNext: true,
+          poolSize: 0,
+          status: 'published',
+          questions: [
+            {
+              id: 'q2-c1-1',
+              type: 'single_choice',
+              questionText: 'Which token tier should UI buttons bind to in a scalable design system?',
+              explanation: 'Binding to semantic or component tokens ensures themes (dark mode, high contrast) switch cleanly without hardcoding hex values.',
+              points: 1,
+              position: 1,
+              options: [
+                { id: 'opt-2-1-1', optionText: 'Component-scoped or Semantic tokens', isCorrect: true, position: 1 },
+                { id: 'opt-2-1-2', optionText: 'Direct Global Primitive Hex Values', isCorrect: false, position: 2 },
+                { id: 'opt-2-1-3', optionText: 'Raw CSS inline strings', isCorrect: false, position: 3 },
+              ],
+            },
+            {
+              id: 'q2-c1-2',
+              type: 'single_choice',
+              questionText: 'What is the minimum WCAG 2.1 AA contrast ratio required for standard body text?',
+              explanation: 'WCAG 2.1 AA requires 4.5:1 for normal body text and 3:1 for large text (18pt or 14pt bold).',
+              points: 1,
+              position: 2,
+              options: [
+                { id: 'opt-2-2-1', optionText: '4.5:1', isCorrect: true, position: 1 },
+                { id: 'opt-2-2-2', optionText: '3.0:1', isCorrect: false, position: 2 },
+                { id: 'opt-2-2-3', optionText: '7.0:1', isCorrect: false, position: 3 },
+                { id: 'opt-2-2-4', optionText: '2.0:1', isCorrect: false, position: 4 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'm3-c1',
+        courseId: 'c1111111-1111-1111-1111-111111111111',
+        title: 'Module 3: Usability Testing, Handoff & Capstone Portfolio',
+        description: 'Run live usability walkthroughs, manage design system governance, and build your verified portfolio case study.',
+        objectives: [
+          'Run cognitive walkthroughs with unmoderated test recordings',
+          'Configure handoff documentation and Code Connect tokens',
+          'Package an executive-ready portfolio case study'
+        ],
+        position: 3,
+        completionRule: 'all_lessons_plus_quiz',
+        unlockRule: 'previous_completed',
+        status: 'published',
+        archived: false,
+        timeline: {
+          id: 't3-c1',
+          moduleId: 'm3-c1',
+          label: 'Week 3',
+          suggestedDuration: '5 days',
+          startOffsetDays: 10,
+          releaseMode: 'self_paced',
+          releaseAfterDays: 0,
+          bufferMinutes: 60,
+          estimatedStudyTimeMinutes: 200,
+        },
+        lessons: [
+          {
+            id: 'l3-1',
+            moduleId: 'm3-c1',
+            title: 'Interactive prototyping & micro-interactions',
+            description: 'Smart animate, interactive component variants, and realistic user flows.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyBlazes.mp4',
+            duration: '30 min',
+            durationSeconds: 1800,
+            position: 1,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l3-2',
+            moduleId: 'm3-c1',
+            title: 'Usability testing & cognitive walkthroughs',
+            description: 'Structuring task rubrics, observing drop-off, and quantifying System Usability Scale (SUS) scores.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
+            duration: '26 min',
+            durationSeconds: 1560,
+            position: 2,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l3-3',
+            moduleId: 'm3-c1',
+            title: 'Design system governance & developer handoff',
+            description: 'Redlining specs, Figma Dev Mode, zero-loss component documentation.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
+            duration: '36 min',
+            durationSeconds: 2160,
+            position: 3,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l3-4',
+            moduleId: 'm3-c1',
+            title: 'Building your portfolio case study & capstone review',
+            description: 'Telling compelling outcome stories and preparing for engineering defense.',
+            type: 'article',
+            articleBody: `# Portfolio Case Study Structure\n\nRecruiters and hiring managers spend an average of 45 seconds scanning a case study. Structure yours using the Executive Summary format:\n\n1. **The Core Metric Moved**: e.g., "Reduced checkout churn by 22% by simplifying card verification".\n2. **The Problem & Constraints**: Timeline, team size, legacy technical limitations.\n3. **Validation & Iteration**: Show at least two discarded approaches and why user testing eliminated them.\n4. **Final Production Artifact**: Live demo links, token repositories, and measurable outcomes.`,
+            duration: '35 min',
+            durationSeconds: 2100,
+            position: 4,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+        ],
+        quiz: {
+          id: 'q3-c1',
+          moduleId: 'm3-c1',
+          title: 'Module 3 Capstone Assessment',
+          instructions: 'Complete this final assessment to earn your course graduation certificate.',
+          isRequired: true,
+          passingPercent: 75,
+          timeLimitMinutes: 15,
+          attemptsAllowed: 3,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          showResultsMode: 'score_and_correct',
+          unlockNext: false,
+          poolSize: 0,
+          status: 'published',
+          questions: [
+            {
+              id: 'q3-c1-1',
+              type: 'single_choice',
+              questionText: 'What is the primary objective of calculating a System Usability Scale (SUS) score?',
+              explanation: 'The SUS score provides a reliable, standardized metric (0 to 100) benchmark across iterations.',
+              points: 2,
+              position: 1,
+              options: [
+                { id: 'opt-3-1-1', optionText: 'To quantify perceived ease of use with a reliable benchmark score', isCorrect: true, position: 1 },
+                { id: 'opt-3-1-2', optionText: 'To measure code compilation time in CI/CD', isCorrect: false, position: 2 },
+                { id: 'opt-3-1-3', optionText: 'To calculate marketing ad spend efficiency', isCorrect: false, position: 3 },
+              ],
+            },
+          ],
+        },
+      },
     ],
   },
   {
     id: 'c4444444-4444-4444-4444-444444444444',
     slug: 'full-stack-web-development-bootcamp',
     title: 'Full-Stack Web Development Bootcamp',
-    description: 'Master modern React, Node.js, Express, PostgreSQL, Drizzle ORM, and cloud deployments from scratch to production.',
+    subtitle: 'From TypeScript fundamentals to PostgreSQL, Drizzle ORM, and cloud scale',
+    description: 'Master modern full-stack web engineering: React 19 architecture, REST API design with Express, PostgreSQL relational modeling, Drizzle ORM migrations, secure authentication, and Cloudinary media processing.',
     instructor: 'Aman Sharma',
     instructorTitle: 'Principal Full-Stack Engineer',
+    instructorBio: 'Principal engineer building high-load distributed platforms with over a decade of production architecture experience.',
+    instructorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=300&q=80',
     thumbnail: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=700&q=80',
+    banner: 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1200&q=80',
+    previewVideo: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
     priceCents: 20000,
     currency: 'USD',
     category: 'Web development',
+    tags: ['React', 'TypeScript', 'Node.js', 'PostgreSQL', 'Drizzle'],
     level: 'Advanced',
-    durationHours: 14,
-    totalDuration: '14 hours · 24 lessons',
-    lessonCount: 24,
-    rating: 5.0,
-    reviewCount: 210,
+    language: 'English',
+    status: 'published',
+    contentVersion: 1,
+    publishedTime: new Date().toISOString(),
     series: 'THE ENGINEERING SERIES',
     tagline: 'Code with precision.',
     badge: 'Popular',
+    rating: 5.0,
+    reviewCount: 210,
+    outcomes: [
+      'Architect robust React 19 frontends with state management and Tailwind CSS',
+      'Design RESTful microservices with Node.js, Express, and JWT security',
+      'Model relational databases with PostgreSQL, Drizzle ORM, and Neon Serverless',
+      'Implement media processing with Cloudinary signed uploads and streaming',
+      'Deploy full-stack web applications with zero downtime'
+    ],
+    requirements: [
+      'Basic familiarity with JavaScript and web concepts',
+      'A computer capable of running Node.js 18+ and VS Code',
+      'Dedication to building real-world software from scratch'
+    ],
+    whoIsItFor: [
+      'Aspiring software engineers looking for end-to-end production mastery',
+      'Frontend developers wanting to master full-stack and database design',
+      'Self-taught developers wanting to fill fundamental architectural gaps'
+    ],
+    totalDuration: '14 hours · 8 lessons',
+    durationHours: 14,
+    lessonCount: 8,
+    moduleCount: 2,
     gradientFrom: '#1e1b4b',
     gradientTo: '#4338ca',
     accentColor: '#4f46e5',
-    lessons: [
-      { id: 'l4-1', title: 'Modern JavaScript (ESNext) & TypeScript essentials', lessonNumber: 1, duration: '45 min' },
-      { id: 'l4-2', title: 'React 19 architecture: Hooks, context, and state', lessonNumber: 2, duration: '50 min' },
-      { id: 'l4-3', title: 'Node.js runtime, EventLoop, and Express REST APIs', lessonNumber: 3, duration: '48 min' },
-      { id: 'l4-4', title: 'Relational data modeling with PostgreSQL & Drizzle', lessonNumber: 4, duration: '55 min' },
-      { id: 'l4-5', title: 'JWT Authentication, secure cookies & rate limiting', lessonNumber: 5, duration: '40 min' },
+    lastUpdatedDate: 'November 2026',
+    modules: [
+      {
+        id: 'm1-c4',
+        courseId: 'c4444444-4444-4444-4444-444444444444',
+        title: 'Module 1: Modern TypeScript, React 19 & State',
+        description: 'TypeScript core patterns, custom hooks, context management, and production UI component architecture.',
+        objectives: [
+          'Master TypeScript generics, unions, and type safety',
+          'Build scalable React 19 components with custom hooks',
+          'Implement secure client-side routing and cache synchronization'
+        ],
+        position: 1,
+        completionRule: 'all_lessons_plus_quiz',
+        unlockRule: 'open',
+        status: 'published',
+        archived: false,
+        timeline: {
+          id: 't1-c4',
+          moduleId: 'm1-c4',
+          label: 'Week 1',
+          suggestedDuration: '4 days',
+          startOffsetDays: 1,
+          releaseMode: 'self_paced',
+          releaseAfterDays: 0,
+          bufferMinutes: 30,
+          estimatedStudyTimeMinutes: 190,
+        },
+        lessons: [
+          {
+            id: 'l4-1',
+            moduleId: 'm1-c4',
+            title: 'Modern JavaScript (ESNext) & TypeScript essentials',
+            description: 'Strict mode, generics, branded types, and compile-time verification.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+            duration: '45 min',
+            durationSeconds: 2700,
+            position: 1,
+            isFreePreview: true,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-2',
+            moduleId: 'm1-c4',
+            title: 'React 19 architecture: Hooks, context, and state',
+            description: 'Custom hooks, lifecycle optimization, and zero-prop-drilling state trees.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+            duration: '50 min',
+            durationSeconds: 3000,
+            position: 2,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-3',
+            moduleId: 'm1-c4',
+            title: 'TypeScript Design Patterns for Clean Code',
+            description: 'Exhaustive type checking, discriminating unions, and immutability.',
+            type: 'article',
+            articleBody: `# TypeScript Discriminated Unions\n\nDiscriminated unions allow you to model complex state machines cleanly without ambiguous optional properties.\n\n\`\`\`typescript\ntype RequestState<T> =\n  | { status: 'idle' }\n  | { status: 'loading' }\n  | { status: 'success'; data: T }\n  | { status: 'error'; error: string };\n\`\`\`\n\nBy matching on \`status\`, TypeScript automatically narrows the type so you never access \`data\` before it is loaded!`,
+            duration: '25 min',
+            durationSeconds: 1500,
+            position: 3,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-4',
+            moduleId: 'm1-c4',
+            title: 'Production Starter Template & Code Sandbox',
+            description: 'Downloadable starter repository with Tailwind CSS, Vite, and strict TypeScript configs.',
+            type: 'resource',
+            duration: '15 min',
+            durationSeconds: 900,
+            position: 4,
+            isFreePreview: false,
+            isRequired: false,
+            status: 'published',
+            archived: false,
+            resources: [
+              { name: 'fullstack-starter-vite-react.zip', url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf', size: '3.4 MB', type: 'zip' }
+            ],
+          },
+        ],
+        quiz: {
+          id: 'q1-c4',
+          moduleId: 'm1-c4',
+          title: 'Module 1 Quiz: TypeScript & React',
+          instructions: 'Verify your understanding of TypeScript discriminated unions and React 19 state principles.',
+          isRequired: true,
+          passingPercent: 70,
+          timeLimitMinutes: 12,
+          attemptsAllowed: 3,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          showResultsMode: 'score_and_correct',
+          unlockNext: true,
+          poolSize: 0,
+          status: 'published',
+          questions: [
+            {
+              id: 'q1-c4-1',
+              type: 'single_choice',
+              questionText: 'Why are discriminated unions preferred over multiple boolean flags for async state?',
+              explanation: 'Discriminated unions make impossible states (such as isLoading=true AND isError=true) unrepresentable at compile time.',
+              points: 2,
+              position: 1,
+              options: [
+                { id: 'opt-c4-1', optionText: 'They make impossible states unrepresentable at compile time', isCorrect: true, position: 1 },
+                { id: 'opt-c4-2', optionText: 'They make the JavaScript bundle smaller', isCorrect: false, position: 2 },
+                { id: 'opt-c4-3', optionText: 'They run faster in the browser DOM', isCorrect: false, position: 3 },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        id: 'm2-c4',
+        courseId: 'c4444444-4444-4444-4444-444444444444',
+        title: 'Module 2: Node.js, Express, PostgreSQL & Drizzle ORM',
+        description: 'Design RESTful APIs, manage schema migrations, relational constraints, and Cloudinary media processing.',
+        objectives: [
+          'Build secure REST endpoints with Express and rate limiting',
+          'Author relational schemas and migrations with Drizzle ORM',
+          'Integrate Cloudinary signed media uploads and secure delivery'
+        ],
+        position: 2,
+        completionRule: 'all_lessons_plus_quiz',
+        unlockRule: 'previous_completed',
+        status: 'published',
+        archived: false,
+        timeline: {
+          id: 't2-c4',
+          moduleId: 'm2-c4',
+          label: 'Week 2',
+          suggestedDuration: '5 days',
+          startOffsetDays: 6,
+          releaseMode: 'self_paced',
+          releaseAfterDays: 0,
+          bufferMinutes: 45,
+          estimatedStudyTimeMinutes: 220,
+        },
+        lessons: [
+          {
+            id: 'l4-5',
+            moduleId: 'm2-c4',
+            title: 'Node.js runtime, EventLoop, and Express REST APIs',
+            description: 'Non-blocking I/O, middleware chaining, and robust error handling.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
+            duration: '48 min',
+            durationSeconds: 2880,
+            position: 1,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-6',
+            moduleId: 'm2-c4',
+            title: 'Relational data modeling with PostgreSQL & Drizzle',
+            description: 'Foreign keys, indexes, joins, and declarative schema migrations.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            duration: '55 min',
+            durationSeconds: 3300,
+            position: 2,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-7',
+            moduleId: 'm2-c4',
+            title: 'JWT Authentication, secure cookies & rate limiting',
+            description: 'HttpOnly cookie tokens, CSRF protection, and Redis-style rate limiters.',
+            type: 'video',
+            videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
+            duration: '40 min',
+            durationSeconds: 2400,
+            position: 3,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+          {
+            id: 'l4-8',
+            moduleId: 'm2-c4',
+            title: 'Cloudinary Signed Uploads & Video Streaming',
+            description: 'Direct browser-to-Cloudinary uploads with signature tokens and signed student URLs.',
+            type: 'article',
+            articleBody: `# Cloudinary Signed Direct Uploads\n\nTo prevent overloading the Express server with large video files, clients should upload directly to Cloudinary using temporary signed tokens.\n\n### Security Flow\n1. Admin browser requests signature from \`POST /api/admin/media/signature\`.\n2. Server signs the parameters with \`CLOUDINARY_API_SECRET\` and returns the signature.\n3. Admin browser sends file directly to Cloudinary API.\n4. When complete, Cloudinary returns the \`public_id\` and duration, which the server saves in the database.\n\nThis architecture easily scales to gigabytes of video without crashing the application container!`,
+            duration: '30 min',
+            durationSeconds: 1800,
+            position: 4,
+            isFreePreview: false,
+            isRequired: true,
+            status: 'published',
+            archived: false,
+          },
+        ],
+        quiz: {
+          id: 'q2-c4',
+          moduleId: 'm2-c4',
+          title: 'Module 2 Quiz: Backend & Database Architecture',
+          instructions: 'Complete this assessment covering PostgreSQL relations and secure media delivery.',
+          isRequired: true,
+          passingPercent: 75,
+          timeLimitMinutes: 15,
+          attemptsAllowed: 3,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          showResultsMode: 'score_and_correct',
+          unlockNext: false,
+          poolSize: 0,
+          status: 'published',
+          questions: [
+            {
+              id: 'q2-c4-1',
+              type: 'single_choice',
+              questionText: 'What is the main benefit of browser direct uploads to Cloudinary with server signatures?',
+              explanation: 'Direct uploads keep heavy multipart video streams completely off the application server.',
+              points: 2,
+              position: 1,
+              options: [
+                { id: 'opt-c4-2-1', optionText: 'Large video streams bypass application servers, preventing memory exhaustion', isCorrect: true, position: 1 },
+                { id: 'opt-c4-2-2', optionText: 'It eliminates the need for any database records', isCorrect: false, position: 2 },
+                { id: 'opt-c4-2-3', optionText: 'It automatically translates videos into 40 languages', isCorrect: false, position: 3 },
+              ],
+            },
+          ],
+        },
+      },
     ],
   },
 ];
+
+// Calculate derived totals on initial seed
+for (const c of initialCoursesSeed) {
+  calculateCourseTotals(c);
+}
+
+// -------------------------------------------------------------
+// Persistence & Cache System
+// -------------------------------------------------------------
 
 export function loadCoursesFromFile(): CourseData[] {
   try {
@@ -239,14 +990,111 @@ export function loadCoursesFromFile(): CourseData[] {
       const data = fs.readFileSync(COURSES_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        // Upgrade legacy flat courses to modern multi-module hierarchy if needed
         let modified = false;
         for (const c of parsed) {
           if (!isValidUUID(c.id)) {
-            console.log(`[Migration] Migrating course "${c.title}" invalid non-UUID ID "${c.id}" to RFC-4122 UUID...`);
             c.id = crypto.randomUUID();
             modified = true;
           }
+          if (!c.modules || !Array.isArray(c.modules) || c.modules.length === 0) {
+            console.log(`[Migration] Upgrading course "${c.title}" to multi-module hierarchy...`);
+            const lessons = c.lessons || [];
+            const mid = Math.ceil(lessons.length / 2);
+            c.modules = [
+              {
+                id: crypto.randomUUID(),
+                courseId: c.id,
+                title: 'Module 1: Foundations & Architecture',
+                description: 'Core concepts and architectural foundations.',
+                objectives: ['Master fundamentals', 'Understand core workflows'],
+                position: 1,
+                completionRule: 'all_lessons',
+                unlockRule: 'open',
+                status: 'published',
+                archived: false,
+                timeline: {
+                  id: crypto.randomUUID(),
+                  moduleId: '',
+                  label: 'Week 1',
+                  suggestedDuration: '4 days',
+                  startOffsetDays: 1,
+                  releaseMode: 'self_paced',
+                  releaseAfterDays: 0,
+                  bufferMinutes: 20,
+                  estimatedStudyTimeMinutes: 120,
+                },
+                lessons: lessons.slice(0, Math.max(1, mid)).map((l: any, i: number) => ({
+                  id: l.id || crypto.randomUUID(),
+                  moduleId: '',
+                  title: l.title || `Lesson ${i + 1}`,
+                  description: '',
+                  type: 'video',
+                  videoUrl: l.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+                  duration: l.duration || '20 min',
+                  durationSeconds: 1200,
+                  position: i + 1,
+                  isFreePreview: i === 0,
+                  isRequired: true,
+                  status: 'published',
+                  archived: false,
+                })),
+              },
+              {
+                id: crypto.randomUUID(),
+                courseId: c.id,
+                title: 'Module 2: Practical Implementation & Capstone',
+                description: 'Hands-on project development and production mastery.',
+                objectives: ['Build end-to-end projects', 'Complete verified portfolio review'],
+                position: 2,
+                completionRule: 'all_lessons',
+                unlockRule: 'previous_completed',
+                status: 'published',
+                archived: false,
+                timeline: {
+                  id: crypto.randomUUID(),
+                  moduleId: '',
+                  label: 'Week 2',
+                  suggestedDuration: '5 days',
+                  startOffsetDays: 5,
+                  releaseMode: 'self_paced',
+                  releaseAfterDays: 0,
+                  bufferMinutes: 30,
+                  estimatedStudyTimeMinutes: 160,
+                },
+                lessons: lessons.slice(Math.max(1, mid)).map((l: any, i: number) => ({
+                  id: l.id || crypto.randomUUID(),
+                  moduleId: '',
+                  title: l.title || `Lesson ${mid + i + 1}`,
+                  description: '',
+                  type: 'video',
+                  videoUrl: l.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
+                  duration: l.duration || '25 min',
+                  durationSeconds: 1500,
+                  position: i + 1,
+                  isFreePreview: false,
+                  isRequired: true,
+                  status: 'published',
+                  archived: false,
+                })),
+              },
+            ];
+            modified = true;
+          }
+
+          // Ensure all IDs are connected
+          for (const m of c.modules) {
+            m.courseId = c.id;
+            if (m.timeline) m.timeline.moduleId = m.id;
+            for (const l of m.lessons) {
+              l.moduleId = m.id;
+            }
+            if (m.quiz) m.quiz.moduleId = m.id;
+          }
+
+          calculateCourseTotals(c);
         }
+
         if (modified) {
           try {
             fs.writeFileSync(COURSES_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
@@ -258,7 +1106,7 @@ export function loadCoursesFromFile(): CourseData[] {
       }
     }
   } catch (err) {
-    console.error('Failed to load courses from file, falling back to default seed:', err);
+    console.error('Failed to load courses from file, falling back to initial seed:', err);
   }
   return initialCoursesSeed;
 }
@@ -276,13 +1124,13 @@ export function persistCourses(): void {
   }
 }
 
-// Initial persist if file doesn't exist yet
+// Initial write if not exists
 if (!fs.existsSync(COURSES_FILE)) {
   persistCourses();
 }
 
 /**
- * Synchronizes a Course object into Neon PostgreSQL schema.courses table
+ * Synchronizes Course hierarchy to Neon PostgreSQL database
  */
 export async function syncCourseToDb(course: CourseData) {
   if (!isDatabaseConnected || !db || !isValidUUID(course.id)) return;
@@ -300,19 +1148,26 @@ export async function syncCourseToDb(course: CourseData) {
       id: course.id,
       slug: course.slug,
       title: course.title,
+      subtitle: course.subtitle || '',
       description: course.description || '',
       thumbnail: course.thumbnail || '',
+      banner: course.banner || '',
+      previewVideo: course.previewVideo || '',
       priceCents: course.priceCents || 20000,
       currency: course.currency || 'USD',
-      level: course.level || 'All Levels',
+      level: course.level || 'Beginner',
+      language: course.language || 'English',
+      category: course.category || 'Engineering',
+      tags: course.tags || [],
       status: (course.status as any) || 'published',
+      contentVersion: course.contentVersion || 1,
+      publishedTime: course.publishedTime ? new Date(course.publishedTime) : new Date(),
       series: course.series || 'THE CAREER SERIES',
       tagline: course.tagline || '',
       instructor: course.instructor || 'Lead Instructor',
       instructorTitle: course.instructorTitle || 'Industry Practitioner',
       instructorBio: course.instructorBio || '',
       instructorAvatar: course.instructorAvatar || '',
-      language: course.language || 'English',
       lastUpdatedDate: course.lastUpdatedDate || 'November 2026',
       badge: course.badge || '',
       rating: course.rating ? course.rating.toString() : '4.9',
@@ -334,120 +1189,397 @@ export async function syncCourseToDb(course: CourseData) {
         createdAt: new Date(),
       });
     }
-  } catch (err: any) {
-    if (rawSql && err?.message && err.message.includes('does not exist')) {
-      console.log('[Neon PostgreSQL] Applying missing columns migration and retrying sync...');
-      await ensureDatabaseSchema(rawSql);
-      try {
-        await db.insert(schema.courses).values({
-          id: course.id,
-          slug: course.slug,
-          title: course.title,
-          description: course.description || '',
-          priceCents: course.priceCents || 20000,
-          currency: course.currency || 'USD',
-          level: course.level || 'All Levels',
-          status: (course.status as any) || 'published',
-          series: course.series || 'THE CAREER SERIES',
-          instructor: course.instructor || 'Lead Instructor',
-          createdAt: new Date(),
+
+    // Sync Modules
+    if (Array.isArray(course.modules)) {
+      for (const m of course.modules) {
+        if (!isValidUUID(m.id)) continue;
+        const existingMod = await db.select({ id: schema.modules.id }).from(schema.modules).where(eq(schema.modules.id, m.id));
+        const modValues = {
+          id: m.id,
+          courseId: course.id,
+          title: m.title,
+          description: m.description || '',
+          objectives: m.objectives || [],
+          position: m.position || 1,
+          completionRule: m.completionRule || 'all_lessons',
+          unlockRule: m.unlockRule || 'open',
+          status: m.status || 'published',
+          archived: m.archived || false,
           updatedAt: new Date(),
-        }).onConflictDoNothing();
-        return;
-      } catch (retryErr: any) {
-        console.warn('Retry sync course warning:', retryErr?.message || retryErr);
+        };
+        if (existingMod.length > 0) {
+          await db.update(schema.modules).set(modValues).where(eq(schema.modules.id, m.id));
+        } else {
+          await db.insert(schema.modules).values({ ...modValues, createdAt: new Date() });
+        }
+
+        // Sync module timeline
+        if (m.timeline && isValidUUID(m.timeline.id)) {
+          const existingTl = await db.select({ id: schema.moduleTimelines.id }).from(schema.moduleTimelines).where(eq(schema.moduleTimelines.moduleId, m.id));
+          const tlValues = {
+            id: m.timeline.id,
+            moduleId: m.id,
+            label: m.timeline.label || 'Week 1',
+            suggestedDuration: m.timeline.suggestedDuration || '3 days',
+            startOffsetDays: m.timeline.startOffsetDays || 1,
+            releaseMode: m.timeline.releaseMode || 'self_paced',
+            releaseAfterDays: m.timeline.releaseAfterDays || 0,
+            bufferMinutes: m.timeline.bufferMinutes || 0,
+            estimatedStudyTimeMinutes: m.timeline.estimatedStudyTimeMinutes || 60,
+            updatedAt: new Date(),
+          };
+          if (existingTl.length > 0) {
+            await db.update(schema.moduleTimelines).set(tlValues).where(eq(schema.moduleTimelines.moduleId, m.id));
+          } else {
+            await db.insert(schema.moduleTimelines).values({ ...tlValues, createdAt: new Date() });
+          }
+        }
+
+        // Sync Lessons
+        if (Array.isArray(m.lessons)) {
+          for (const l of m.lessons) {
+            if (!isValidUUID(l.id)) continue;
+            const existingLes = await db.select({ id: schema.lessons.id }).from(schema.lessons).where(eq(schema.lessons.id, l.id));
+            const lesValues = {
+              id: l.id,
+              moduleId: m.id,
+              title: l.title,
+              description: l.description || '',
+              type: (l.type as any) || 'video',
+              articleBody: l.articleBody || '',
+              mediaAssetId: l.mediaAssetId || null,
+              mediaUrl: l.mediaUrl || l.videoUrl || null,
+              videoUrl: l.videoUrl || null,
+              durationFormatted: l.duration || '15 min',
+              durationSeconds: l.durationSeconds || 900,
+              position: l.position || 1,
+              isFreePreview: l.isFreePreview || false,
+              isRequired: l.isRequired !== false,
+              status: l.status || 'published',
+              archived: l.archived || false,
+              resources: l.resources || [],
+              updatedAt: new Date(),
+            };
+            if (existingLes.length > 0) {
+              await db.update(schema.lessons).set(lesValues).where(eq(schema.lessons.id, l.id));
+            } else {
+              await db.insert(schema.lessons).values({ ...lesValues, createdAt: new Date() });
+            }
+          }
+        }
+
+        // Sync Quiz
+        if (m.quiz && isValidUUID(m.quiz.id)) {
+          const existingQuiz = await db.select({ id: schema.quizzes.id }).from(schema.quizzes).where(eq(schema.quizzes.id, m.quiz.id));
+          const quizValues = {
+            id: m.quiz.id,
+            moduleId: m.id,
+            title: m.quiz.title,
+            instructions: m.quiz.instructions || '',
+            isRequired: m.quiz.isRequired || false,
+            passingPercent: m.quiz.passingPercent || 70,
+            timeLimitMinutes: m.quiz.timeLimitMinutes || 0,
+            attemptsAllowed: m.quiz.attemptsAllowed || 0,
+            shuffleQuestions: m.quiz.shuffleQuestions || false,
+            shuffleOptions: m.quiz.shuffleOptions || false,
+            showResultsMode: m.quiz.showResultsMode || 'score_and_correct',
+            unlockNext: m.quiz.unlockNext || false,
+            poolSize: m.quiz.poolSize || 0,
+            status: m.quiz.status || 'published',
+            updatedAt: new Date(),
+          };
+          if (existingQuiz.length > 0) {
+            await db.update(schema.quizzes).set(quizValues).where(eq(schema.quizzes.id, m.quiz.id));
+          } else {
+            await db.insert(schema.quizzes).values({ ...quizValues, createdAt: new Date() });
+          }
+        }
       }
     }
-    console.warn('Sync course to Neon DB warning:', err?.message || err);
+  } catch (err: any) {
+    console.warn('[Neon PostgreSQL] Course sync notice:', err?.message || err);
   }
 }
 
-// Background sync of all seed/file courses into Neon DB
-if (isDatabaseConnected && db) {
-  (async () => {
-    try {
-      if (schemaSyncPromise) {
-        await schemaSyncPromise;
-      }
-      for (const c of initialCourses) {
-        if (isValidUUID(c.id)) {
-          await syncCourseToDb(c);
-        }
-      }
-      console.log('[Neon PostgreSQL] Synchronized courses into Neon PostgreSQL successfully');
-    } catch (e: any) {
-      console.warn('Startup course sync warning:', e?.message || e);
-    }
-  })();
-}
+// -------------------------------------------------------------
+// Enrollments & Progress Store
+// -------------------------------------------------------------
 
-// Fallback in-memory enrollments and purchases storage
-export const mockEnrollments: Array<{
+export interface MockEnrollment {
   id: string;
   userId: string;
   courseId: string;
   status: 'active' | 'revoked';
-  enrolledDate: Date;
-}> = [];
+  enrolledDate: string;
+  completedDate?: string;
+}
 
-/**
- * Universal idempotent enrollment helper that writes to BOTH Neon DB and mock store
- */
-export async function enrollUserInCourse(userId: string, courseId: string, purchaseId?: string) {
-  // 1. Update in-memory fallback
-  const existingMock = mockEnrollments.find((e) => e.userId === userId && e.courseId === courseId);
-  if (!existingMock) {
-    mockEnrollments.push({
-      id: 'enr_' + Date.now().toString(36),
-      userId,
-      courseId,
+export function loadEnrollmentsFromFile(): MockEnrollment[] {
+  try {
+    if (fs.existsSync(ENROLLMENTS_FILE)) {
+      const data = fs.readFileSync(ENROLLMENTS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // fallback
+  }
+  return [
+    {
+      id: 'enr-1',
+      userId: '11111111-1111-1111-1111-111111111111',
+      courseId: 'c1111111-1111-1111-1111-111111111111',
       status: 'active',
-      enrolledDate: new Date(),
+      enrolledDate: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
+    },
+    {
+      id: 'enr-2',
+      userId: '11111111-1111-1111-1111-111111111111',
+      courseId: 'c4444444-4444-4444-4444-444444444444',
+      status: 'active',
+      enrolledDate: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+    },
+  ];
+}
+
+export const mockEnrollments: MockEnrollment[] = loadEnrollmentsFromFile();
+
+export function persistEnrollments(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(ENROLLMENTS_FILE, JSON.stringify(mockEnrollments, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to persist enrollments:', err);
+  }
+}
+
+export interface StudentProgressState {
+  completedLessonIds: string[];
+  lessonProgress: Record<string, { secondsWatched: number; lastPosition: number; completed: boolean; completedDate?: string }>;
+  passedQuizIds: string[];
+  quizAttempts: Record<string, Array<{ attemptNumber: number; scorePercent: number; passed: boolean; submittedDate: string }>>;
+  savedQuizAnswers: Record<string, Record<string, any>>;
+  lastOpenedLessonId?: string;
+  totalTimeMinutes: number;
+  isCompleted: boolean;
+  completedDate?: string;
+  updatedAt: string;
+}
+
+export function loadProgressFromFile(): Map<string, StudentProgressState> {
+  const map = new Map<string, StudentProgressState>();
+  try {
+    if (fs.existsSync(PROGRESS_FILE)) {
+      const data = fs.readFileSync(PROGRESS_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      for (const [key, val] of Object.entries(parsed)) {
+        map.set(key, val as StudentProgressState);
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return map;
+}
+
+export const mockProgressMap = loadProgressFromFile();
+
+export function persistProgress(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const obj: Record<string, any> = {};
+    mockProgressMap.forEach((val, key) => {
+      obj[key] = val;
     });
-  } else {
-    existingMock.status = 'active';
+    fs.writeFileSync(PROGRESS_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to persist progress:', err);
+  }
+}
+
+export function getStudentProgress(userId: string, courseId: string): StudentProgressState {
+  const key = `${userId}:${courseId}`;
+  if (!mockProgressMap.has(key)) {
+    mockProgressMap.set(key, {
+      completedLessonIds: [],
+      lessonProgress: {},
+      passedQuizIds: [],
+      quizAttempts: {},
+      savedQuizAnswers: {},
+      totalTimeMinutes: 0,
+      isCompleted: false,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  return mockProgressMap.get(key)!;
+}
+
+export function calculateCourseProgress(course: CourseData, progress: StudentProgressState, enrolledDate?: string) {
+  let totalRequiredItems = 0;
+  let completedRequiredItems = 0;
+  let totalLessonsCount = 0;
+  let completedLessonsCount = 0;
+  let timeWatchedSec = 0;
+  let timeRemainingSec = 0;
+
+  const enrollmentTime = enrolledDate ? new Date(enrolledDate).getTime() : Date.now();
+  const daysSinceEnrollment = Math.max(0, Math.floor((Date.now() - enrollmentTime) / (1000 * 60 * 60 * 24)));
+
+  let previousModuleCompleted = true;
+  let currentActiveLesson: LessonData | null = null;
+  let currentActiveModule: ModuleData | null = null;
+
+  const moduleStatuses: Array<{
+    moduleId: string;
+    title: string;
+    percent: number;
+    status: 'not_started' | 'in_progress' | 'completed' | 'locked';
+    lockReason?: string;
+    lessonsDone: number;
+    totalLessons: number;
+    quizStatus?: { passed: boolean; score?: number; attemptsLeft?: number; isRequired: boolean };
+    estimatedStudyTimeMinutes: number;
+    timeline: ModuleTimelineData;
+  }> = [];
+
+  for (let mIdx = 0; mIdx < course.modules.length; mIdx++) {
+    const mod = course.modules[mIdx];
+    if (mod.archived) continue;
+
+    let modRequiredItems = 0;
+    let modCompletedItems = 0;
+    let modLessonsDone = 0;
+    let modTotalLessons = 0;
+
+    // Determine lock state
+    let isLocked = false;
+    let lockReason = '';
+
+    if (mod.unlockRule === 'previous_completed' && !previousModuleCompleted) {
+      isLocked = true;
+      lockReason = 'Complete previous module to unlock';
+    } else if (mod.timeline?.releaseMode === 'scheduled' && mod.timeline.releaseAfterDays > daysSinceEnrollment) {
+      isLocked = true;
+      const daysLeft = mod.timeline.releaseAfterDays - daysSinceEnrollment;
+      lockReason = `Unlocks in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`;
+    }
+
+    for (const les of mod.lessons) {
+      if (les.archived) continue;
+      modTotalLessons++;
+      totalLessonsCount++;
+
+      const isCompleted = progress.completedLessonIds.includes(les.id);
+      if (isCompleted) {
+        modLessonsDone++;
+        completedLessonsCount++;
+        timeWatchedSec += les.durationSeconds || 900;
+      } else {
+        timeRemainingSec += les.durationSeconds || 900;
+        if (!currentActiveLesson && !isLocked) {
+          currentActiveLesson = les;
+          currentActiveModule = mod;
+        }
+      }
+
+      if (les.isRequired) {
+        modRequiredItems++;
+        totalRequiredItems++;
+        if (isCompleted) {
+          modCompletedItems++;
+          completedRequiredItems++;
+        }
+      }
+    }
+
+    // Module Quiz check
+    let quizStatus = undefined;
+    if (mod.quiz && mod.quiz.status !== 'draft') {
+      const isPassed = progress.passedQuizIds.includes(mod.quiz.id);
+      const attempts = progress.quizAttempts[mod.quiz.id] || [];
+      const bestScore = attempts.length > 0 ? Math.max(...attempts.map((a) => a.scorePercent)) : undefined;
+      const attemptsLeft = mod.quiz.attemptsAllowed > 0 ? Math.max(0, mod.quiz.attemptsAllowed - attempts.length) : undefined;
+
+      quizStatus = {
+        passed: isPassed,
+        score: bestScore,
+        attemptsLeft,
+        isRequired: mod.quiz.isRequired,
+      };
+
+      if (mod.completionRule === 'all_lessons_plus_quiz' || mod.quiz.isRequired) {
+        modRequiredItems++;
+        totalRequiredItems++;
+        if (isPassed) {
+          modCompletedItems++;
+          completedRequiredItems++;
+        }
+      }
+    }
+
+    const modPercent = modRequiredItems > 0 ? Math.round((modCompletedItems / modRequiredItems) * 100) : 100;
+    let modStatus: 'not_started' | 'in_progress' | 'completed' | 'locked' = 'not_started';
+
+    if (isLocked) {
+      modStatus = 'locked';
+    } else if (modPercent >= 100) {
+      modStatus = 'completed';
+    } else if (modPercent > 0 || modLessonsDone > 0) {
+      modStatus = 'in_progress';
+    }
+
+    // For unlocking subsequent modules
+    previousModuleCompleted = modStatus === 'completed';
+
+    moduleStatuses.push({
+      moduleId: mod.id,
+      title: mod.title,
+      percent: modPercent,
+      status: modStatus,
+      lockReason: isLocked ? lockReason : undefined,
+      lessonsDone: modLessonsDone,
+      totalLessons: modTotalLessons,
+      quizStatus,
+      estimatedStudyTimeMinutes: mod.timeline?.estimatedStudyTimeMinutes || 60,
+      timeline: mod.timeline,
+    });
   }
 
-  // 2. Insert into Neon Postgres database if connected
-  if (isDatabaseConnected && db && isValidUUID(userId) && isValidUUID(courseId)) {
-    try {
-      if (schemaSyncPromise) {
-        await schemaSyncPromise;
-      }
+  // Course Progress Percent (Section 7.3 & 9.2: Completed students keep 100% bonus status)
+  let overallPercent = totalRequiredItems > 0 ? Math.round((completedRequiredItems / totalRequiredItems) * 100) : 0;
+  if (progress.isCompleted) {
+    overallPercent = 100;
+  } else if (overallPercent >= 100) {
+    progress.isCompleted = true;
+    progress.completedDate = new Date().toISOString();
+  }
 
-      // Ensure course is present in schema.courses first
-      const course = initialCourses.find((c) => c.id === courseId);
-      if (course) {
-        await syncCourseToDb(course);
-      }
-
-      const existing = await db
-        .select()
-        .from(schema.enrollments)
-        .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.courseId, courseId)));
-
-      if (existing.length > 0) {
-        if (existing[0].status !== 'active') {
-          await db.update(schema.enrollments).set({ status: 'active' }).where(eq(schema.enrollments.id, existing[0].id));
-        }
-      } else {
-        await db.insert(schema.enrollments).values({
-          id: crypto.randomUUID(),
-          userId,
-          courseId,
-          status: 'active',
-          purchaseId: purchaseId && isValidUUID(purchaseId) ? purchaseId : null,
-        });
-      }
-    } catch (dbErr: any) {
-      console.warn('Neon DB enrollment save warning:', dbErr?.message || dbErr);
+  // Pace indicator based on suggested start offset (Section 5.3)
+  let paceIndicator: 'on_track' | 'behind_pace' = 'on_track';
+  for (const m of moduleStatuses) {
+    if (m.timeline?.startOffsetDays && daysSinceEnrollment > m.timeline.startOffsetDays + 3 && m.status !== 'completed') {
+      paceIndicator = 'behind_pace';
+      break;
     }
   }
+
+  return {
+    percent: overallPercent,
+    isCompleted: progress.isCompleted,
+    completedLessons: completedLessonsCount,
+    totalLessons: totalLessonsCount,
+    timeWatchedFormatted: `${Math.round(timeWatchedSec / 60)} min`,
+    timeRemainingFormatted: `${Math.round(timeRemainingSec / 60)} min`,
+    paceIndicator,
+    currentLesson: currentActiveLesson,
+    currentModule: currentActiveModule,
+    modules: moduleStatuses,
+  };
 }
 
 export interface MockPurchase {
   id: string;
-  orderId?: string;
   userId: string;
   studentName: string;
   studentEmail: string;
@@ -456,55 +1588,96 @@ export interface MockPurchase {
   amountCents: number;
   currency: string;
   provider: 'cashfree' | 'stripe' | 'paypal';
+  orderId?: string;
   status: 'paid' | 'refunded' | 'pending';
   createdAt: string;
 }
 
-export const mockPurchases: MockPurchase[] = [];
+export const mockPurchases: MockPurchase[] = [
+  {
+    id: 'pur-1',
+    userId: '11111111-1111-1111-1111-111111111111',
+    studentName: 'Priya Sharma',
+    studentEmail: 'priya.s@example.com',
+    courseId: 'c1111111-1111-1111-1111-111111111111',
+    courseTitle: 'Product Design, from insight to impact',
+    amountCents: 20000,
+    currency: 'USD',
+    provider: 'cashfree',
+    status: 'paid',
+    createdAt: new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 'pur-2',
+    userId: '11111111-1111-1111-1111-111111111111',
+    studentName: 'Priya Sharma',
+    studentEmail: 'priya.s@example.com',
+    courseId: 'c4444444-4444-4444-4444-444444444444',
+    courseTitle: 'Full-Stack Web Development Bootcamp',
+    amountCents: 20000,
+    currency: 'USD',
+    provider: 'cashfree',
+    status: 'paid',
+    createdAt: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+  },
+];
 
-// In-memory course progress map: key: `${userId}:${courseId}`
-export interface ProgressState {
-  completedLessons: number;
-  totalLessons: number;
-  percent: number;
-  isCompleted: boolean;
-  lastOpenedLessonNumber: number;
-  lastOpenedLessonTitle: string;
-  totalTimeMinutes: number;
-  updatedAt: Date;
-}
-
-export const mockProgressMap = new Map<string, ProgressState>();
-
-// Helper to get or initialize progress dynamically for user + course
-export function getUserCourseProgress(userId: string, course: CourseData, isEnrolled: boolean): ProgressState {
-  const key = `${userId}:${course.id}`;
-  if (mockProgressMap.has(key)) {
-    return mockProgressMap.get(key)!;
-  }
-
-  const totalLessons = course.lessons?.length || course.lessonCount || 1;
-  const defaultState: ProgressState = {
-    completedLessons: 0,
-    totalLessons,
-    percent: 0,
-    isCompleted: false,
+export function getUserCourseProgress(userId: string, course: CourseData, _isEnrolled?: boolean) {
+  const prog = getStudentProgress(userId, course.id);
+  const summary = calculateCourseProgress(course, prog);
+  return {
+    completedLessons: summary.completedLessons,
+    totalLessons: summary.totalLessons,
+    percent: summary.percent,
+    isCompleted: summary.isCompleted,
     lastOpenedLessonNumber: 1,
-    lastOpenedLessonTitle: course.lessons && course.lessons[0] ? course.lessons[0].title : 'Introduction',
-    totalTimeMinutes: 0,
-    updatedAt: new Date(),
+    lastOpenedLessonTitle: summary.currentLesson?.title || 'Start Learning',
+    totalTimeMinutes: Math.round((summary.completedLessons * 25)),
   };
-
-  if (isEnrolled) {
-    mockProgressMap.set(key, defaultState);
-  }
-  return defaultState;
 }
 
-// 0. GET /api/courses/public (Open Catalog for Landing Page & Visitors)
+export async function enrollUserInCourse(userId: string, courseId: string, purchaseId?: string) {
+  const existing = mockEnrollments.find((e) => e.userId === userId && e.courseId === courseId);
+  if (!existing) {
+    mockEnrollments.push({
+      id: 'enr-' + Date.now().toString(36),
+      userId,
+      courseId,
+      status: 'active',
+      enrolledDate: new Date().toISOString(),
+    });
+    persistEnrollments();
+  }
+
+  if (isDatabaseConnected && db && isValidUUID(userId) && isValidUUID(courseId)) {
+    try {
+      const records = await db
+        .select()
+        .from(schema.enrollments)
+        .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.courseId, courseId)));
+      if (records.length === 0) {
+        await db.insert(schema.enrollments).values({
+          userId,
+          courseId,
+          purchaseId: purchaseId && isValidUUID(purchaseId) ? purchaseId : undefined,
+          status: 'active',
+          enrolledDate: new Date(),
+        });
+      }
+    } catch (err: any) {
+      console.warn('DB enrollment sync warning:', err?.message || err);
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// STUDENT ENDPOINTS (PDF Section 12.1)
+// -------------------------------------------------------------
+
+// 1. GET /api/courses/public (Open Course Catalog for Landing Page)
 router.get('/public', async (_req: Request, res: Response) => {
   try {
-    const published = initialCourses.filter((c) => c.status !== 'draft');
+    const published = initialCourses.filter((c) => c.status === 'published');
     return res.status(200).json({
       success: true,
       courses: published,
@@ -514,7 +1687,8 @@ router.get('/public', async (_req: Request, res: Response) => {
   }
 });
 
-// 0b. GET /api/courses/detail/:slug (PRD Section 4.4 Course Detail Page FR-19, 20, 21, 22, 23, 24)
+// 2. GET /api/courses/detail/:slug (Course Overview Page - PDF Section 3 & 12.1)
+// Public overview with modules, lesson titles, and timelines. No authenticated media links.
 router.get('/detail/:slug', async (req: Request, res: Response) => {
   try {
     const slug = req.params.slug;
@@ -524,7 +1698,7 @@ router.get('/detail/:slug', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Course not found.' });
     }
 
-    // Check optional authenticated user session from cookie or header to determine enrollment
+    // Check optional authenticated enrollment
     let isEnrolled = false;
     let userId: string | null = null;
 
@@ -533,7 +1707,7 @@ router.get('/detail/:slug', async (req: Request, res: Response) => {
       if (token) {
         const decoded: any = (await import('jsonwebtoken')).default.verify(
           token,
-          process.env.JWT_SECRET || 'fallback_secret_internwala_jwt_2026'
+          process.env.JWT_SECRET || 'super_secret_jwt_internwala_production_ready_key_2026'
         );
         userId = decoded?.id;
         if (userId) {
@@ -541,111 +1715,52 @@ router.get('/detail/:slug', async (req: Request, res: Response) => {
         }
       }
     } catch {
-      // Unauthenticated visitor viewing course details
+      // Unauthenticated visitor
     }
 
-    // Standardize curriculum sections (FR-20)
-    let sections = course.sections;
-    if (!sections || sections.length === 0) {
-      const allLessons = course.lessons || [];
-      const mid = Math.ceil(allLessons.length / 3);
-      sections = [
-        {
-          id: 'sec-1',
-          title: 'Section 1: Foundations & Core Architecture',
-          order: 1,
-          lessons: allLessons.slice(0, Math.max(1, mid)).map((l, i) => ({
-            ...l,
-            isFreePreview: i === 0, // First lesson is free preview
+    // Return overview representation without internal protected media URLs
+    const sanitizedModules = course.modules
+      .filter((m) => !m.archived && m.status === 'published')
+      .map((m) => ({
+        id: m.id,
+        title: m.title,
+        description: m.description,
+        objectives: m.objectives,
+        position: m.position,
+        completionRule: m.completionRule,
+        timeline: m.timeline,
+        lessonCount: m.lessons.filter((l) => !l.archived && l.status === 'published').length,
+        lessons: m.lessons
+          .filter((l) => !l.archived && l.status === 'published')
+          .map((l) => ({
+            id: l.id,
+            title: l.title,
+            description: l.description,
+            type: l.type,
+            duration: l.duration,
+            durationSeconds: l.durationSeconds,
+            position: l.position,
+            isFreePreview: l.isFreePreview,
+            isRequired: l.isRequired,
+            // Include videoUrl ONLY if it is marked free preview
+            videoUrl: l.isFreePreview ? l.videoUrl || l.mediaUrl : undefined,
           })),
-        },
-        {
-          id: 'sec-2',
-          title: 'Section 2: Practical Implementation & Deep Work',
-          order: 2,
-          lessons: allLessons.slice(Math.max(1, mid), Math.max(2, mid * 2)),
-        },
-        {
-          id: 'sec-3',
-          title: 'Section 3: Production Handoff & Capstone Portfolio',
-          order: 3,
-          lessons: allLessons.slice(Math.max(2, mid * 2)),
-        },
-      ].filter((s) => s.lessons.length > 0);
-    }
-
-    // Standardize student reviews (FR-23)
-    let reviews = course.reviews;
-    if (!reviews || reviews.length === 0) {
-      reviews = [
-        {
-          id: 'rev-1',
-          studentName: 'Priya Sharma',
-          studentRole: 'Junior Product Designer at Razorpay',
-          rating: 5,
-          reviewText: 'The internship project directly led to my junior design offer. The breakdown of user insights into scalable design tokens was unmatched!',
-          date: 'October 2026',
-        },
-        {
-          id: 'rev-2',
-          studentName: 'Marcus Vance',
-          studentRole: 'Product Lead at Webflow',
-          rating: 5,
-          reviewText: 'Clear, concise, and no fluff. The systems diagrams completely changed how our entire team reviews technical tradeoffs and sprints.',
-          date: 'September 2026',
-        },
-        {
-          id: 'rev-3',
-          studentName: 'Elena Rostova',
-          studentRole: 'Full Stack Engineer',
-          rating: 5,
-          reviewText: 'Extremely well produced lectures. The instructors explain the "why" before diving straight into production-ready implementation.',
-          date: 'August 2026',
-        },
-      ];
-    }
-
-    // Default outcomes (FR-19)
-    const outcomes = course.outcomes && course.outcomes.length > 0
-      ? course.outcomes
-      : [
-          'Master modern industry tools, patterns, and production standards',
-          'Build end-to-end projects ready for client handoff and capstone defense',
-          'Learn to debug real-world edge cases with guided walkthroughs',
-          'Acquire verifiable credentials recognized by partner technology teams',
-        ];
-
-    // Default requirements (FR-19)
-    const requirements = course.requirements && course.requirements.length > 0
-      ? course.requirements
-      : [
-          'Basic familiarity with personal computing and web browsing',
-          'A desire to build practical projects and advance your career',
-          'No prior advanced software engineering experience required',
-        ];
-
-    // Default target audience (FR-19)
-    const whoIsItFor = course.whoIsItFor && course.whoIsItFor.length > 0
-      ? course.whoIsItFor
-      : [
-          'Aspiring professionals looking to break into product, design, or engineering',
-          'Early-career team members wanting to level up their core skills',
-          'Curious builders seeking structured, hands-on learning with verifiable certificates',
-        ];
+        quiz: m.quiz && m.quiz.status === 'published' ? {
+          id: m.quiz.id,
+          title: m.quiz.title,
+          instructions: m.quiz.instructions,
+          isRequired: m.quiz.isRequired,
+          questionCount: m.quiz.questions.length,
+          passingPercent: m.quiz.passingPercent,
+          timeLimitMinutes: m.quiz.timeLimitMinutes,
+        } : undefined,
+      }));
 
     return res.status(200).json({
       success: true,
       course: {
         ...course,
-        outcomes,
-        requirements,
-        whoIsItFor,
-        instructorBio: course.instructorBio || `${course.instructor} is an experienced industry mentor and practitioner with a track record of building production systems and mentoring hundreds of high-performing students.`,
-        instructorAvatar: course.instructorAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-        language: course.language || 'English',
-        lastUpdatedDate: course.lastUpdatedDate || 'November 2026',
-        sections,
-        reviews,
+        modules: sanitizedModules,
         isEnrolled,
       },
     });
@@ -655,159 +1770,522 @@ router.get('/detail/:slug', async (req: Request, res: Response) => {
   }
 });
 
-// 0c. GET /api/courses/:slug/preview/:lessonId (FR-20 Free Lesson Preview Video stream)
-router.get('/:slug/preview/:lessonId', async (req: Request, res: Response) => {
+// 3. GET /api/courses/:id/learn (Enrolled Classroom View - PDF Section 12.1)
+// Requires active enrollment. Returns modules, lessons, quiz status, timeline, and student progress.
+router.get('/:id/learn', authenticate, async (req: Request, res: Response) => {
   try {
-    const { slug, lessonId } = req.params;
-    const course = initialCourses.find((c) => c.slug === slug || c.id === slug);
+    const userId = req.user!.id;
+    const courseId = req.params.id;
+
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found.' });
     }
 
-    const lesson = course.lessons.find((l) => l.id === lessonId || l.lessonNumber.toString() === lessonId);
-    if (!lesson) {
-      return res.status(404).json({ success: false, message: 'Lesson not found.' });
+    // Verify enrollment
+    const enrollment = mockEnrollments.find((e) => e.userId === userId && e.courseId === course.id && e.status === 'active');
+    if (!enrollment) {
+      return res.status(403).json({
+        success: false,
+        code: 'ENROLLMENT_REQUIRED',
+        message: 'You must be enrolled in this course to access the classroom.',
+      });
     }
 
-    // Confirm that preview is free
+    const progress = getStudentProgress(userId, course.id);
+    const progressSummary = calculateCourseProgress(course, progress, enrollment.enrolledDate);
+
+    // Filter published, non-archived content
+    const modulesWithProgress = course.modules
+      .filter((m) => !m.archived && m.status === 'published')
+      .map((m) => {
+        const modStatus = progressSummary.modules.find((ms) => ms.moduleId === m.id);
+        const isLocked = modStatus?.status === 'locked';
+
+        return {
+          id: m.id,
+          title: m.title,
+          description: m.description,
+          objectives: m.objectives,
+          position: m.position,
+          completionRule: m.completionRule,
+          unlockRule: m.unlockRule,
+          status: modStatus?.status || 'not_started',
+          lockReason: modStatus?.lockReason,
+          percent: modStatus?.percent || 0,
+          timeline: m.timeline,
+          quizStatus: modStatus?.quizStatus,
+          lessons: m.lessons
+            .filter((l) => !l.archived && l.status === 'published')
+            .map((l) => {
+              const isCompleted = progress.completedLessonIds.includes(l.id);
+              const lessonProg = progress.lessonProgress[l.id];
+
+              return {
+                id: l.id,
+                title: l.title,
+                description: l.description,
+                type: l.type,
+                duration: l.duration,
+                durationSeconds: l.durationSeconds,
+                position: l.position,
+                isFreePreview: l.isFreePreview,
+                isRequired: l.isRequired,
+                completed: isCompleted,
+                lastPosition: lessonProg?.lastPosition || 0,
+                secondsWatched: lessonProg?.secondsWatched || 0,
+                locked: isLocked,
+              };
+            }),
+          quiz: m.quiz && m.quiz.status === 'published' ? {
+            id: m.quiz.id,
+            title: m.quiz.title,
+            instructions: m.quiz.instructions,
+            isRequired: m.quiz.isRequired,
+            passingPercent: m.quiz.passingPercent,
+            timeLimitMinutes: m.quiz.timeLimitMinutes,
+            attemptsAllowed: m.quiz.attemptsAllowed,
+            questionCount: m.quiz.questions.length,
+            passed: progress.passedQuizIds.includes(m.quiz.id),
+            locked: isLocked,
+          } : undefined,
+        };
+      });
+
     return res.status(200).json({
       success: true,
-      preview: {
-        courseTitle: course.title,
-        lessonTitle: lesson.title,
-        lessonNumber: lesson.lessonNumber,
-        duration: lesson.duration,
-        videoUrl: lesson.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        isFreePreview: true,
+      course: {
+        id: course.id,
+        slug: course.slug,
+        title: course.title,
+        subtitle: course.subtitle,
+        description: course.description,
+        thumbnail: course.thumbnail,
+        instructor: course.instructor,
+        instructorTitle: course.instructorTitle,
+        contentVersion: course.contentVersion,
+        totalDuration: course.totalDuration,
+        lessonCount: course.lessonCount,
+        moduleCount: course.moduleCount,
       },
+      progress: progressSummary,
+      modules: modulesWithProgress,
     });
   } catch (error: any) {
-    return res.status(500).json({ success: false, message: 'Preview unavailable.' });
+    console.error('Course learn error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load course learning context.' });
   }
 });
 
-// 1. GET /api/courses/dashboard (FR-14, FR-15, FR-16, FR-17, FR-18)
-router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
+// 4. GET /api/courses/:courseId/lessons/:lessonId (Lesson Content & Signed Cloudinary URL - PDF Section 10.2 & 12.1)
+router.get('/:courseId/lessons/:lessonId', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
-    const tab = (req.query.tab as string) || 'all'; // 'all' | 'my-courses' | 'completed' (FR-16)
-    const searchQuery = (req.query.search as string)?.toLowerCase().trim() || ''; // (FR-17)
-    const categoryFilter = (req.query.category as string) || ''; // (FR-17)
-    const levelFilter = (req.query.level as string) || ''; // (FR-17)
-    const durationFilter = (req.query.duration as string) || ''; // (FR-17)
-    const sort = (req.query.sort as string) || 'newest';
+    const { courseId, lessonId } = req.params;
 
-    // 1. Determine enrolled course IDs for this user
-    let enrolledCourseIds: string[] = [];
-    if (isDatabaseConnected && db && isValidUUID(userId)) {
-      try {
-        const records = await db
-          .select()
-          .from(schema.enrollments)
-          .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.status, 'active')));
-        enrolledCourseIds = records.map((r: any) => r.courseId);
-      } catch (dbErr: any) {
-        console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
+
+    let targetModule: ModuleData | null = null;
+    let targetLesson: LessonData | null = null;
+
+    for (const m of course.modules) {
+      const found = m.lessons.find((l) => l.id === lessonId);
+      if (found) {
+        targetModule = m;
+        targetLesson = found;
+        break;
       }
     }
 
-    // Always merge in any active enrollments from mock store as well
-    const mockIds = mockEnrollments
-      .filter((e) => e.userId === userId && e.status === 'active')
-      .map((e) => e.courseId);
+    if (!targetLesson || !targetModule) {
+      return res.status(404).json({ success: false, message: 'Lesson not found.' });
+    }
 
-    const mergedEnrolledIds = Array.from(new Set([...enrolledCourseIds, ...mockIds]));
+    // Verify enrollment or free preview
+    const isEnrolled = mockEnrollments.some((e) => e.userId === userId && e.courseId === course.id && e.status === 'active');
+    if (!isEnrolled && !targetLesson.isFreePreview) {
+      return res.status(403).json({ success: false, message: 'Enrollment required for this lesson.' });
+    }
 
-    // 2. Map ONLY enrolled courses for the student dashboard (no un-enrolled / locked courses)
-    const availableCourses = initialCourses.filter((c) => mergedEnrolledIds.includes(c.id));
+    // Generate signed, short-lived Cloudinary URL if media asset is attached (Section 10.2)
+    let streamingUrl = targetLesson.videoUrl || targetLesson.mediaUrl;
+    if (targetLesson.mediaAssetId) {
+      streamingUrl = generateSignedDeliveryUrl(targetLesson.mediaAssetId, {
+        resourceType: targetLesson.type === 'video' ? 'video' : targetLesson.type === 'audio' ? 'video' : 'raw',
+        expiresInSeconds: 3600,
+      });
+    }
 
-    let processedCourses = availableCourses.map((c) => {
-      const isEnrolled = true;
-      const progress = getUserCourseProgress(userId, c, isEnrolled);
+    const progress = getStudentProgress(userId, course.id);
+    const lessonProg = progress.lessonProgress[targetLesson.id];
+
+    return res.status(200).json({
+      success: true,
+      lesson: {
+        id: targetLesson.id,
+        moduleId: targetModule.id,
+        moduleTitle: targetModule.title,
+        title: targetLesson.title,
+        description: targetLesson.description,
+        type: targetLesson.type,
+        articleBody: targetLesson.articleBody,
+        mediaUrl: streamingUrl,
+        videoUrl: streamingUrl,
+        duration: targetLesson.duration,
+        durationSeconds: targetLesson.durationSeconds,
+        position: targetLesson.position,
+        isFreePreview: targetLesson.isFreePreview,
+        isRequired: targetLesson.isRequired,
+        resources: targetLesson.resources || [],
+        completed: progress.completedLessonIds.includes(targetLesson.id),
+        lastPosition: lessonProg?.lastPosition || 0,
+        secondsWatched: lessonProg?.secondsWatched || 0,
+      },
+    });
+  } catch (error: any) {
+    console.error('Fetch lesson error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load lesson content.' });
+  }
+});
+
+// 5. POST /api/courses/:courseId/lessons/:lessonId/progress (Save Position & Auto-Complete - PDF Section 7.1 & 12.1)
+router.post('/:courseId/lessons/:lessonId/progress', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { courseId, lessonId } = req.params;
+    const { secondsWatched, lastPosition, markCompleted } = req.body;
+
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found.' });
+    }
+
+    let targetLesson: LessonData | null = null;
+    for (const m of course.modules) {
+      const found = m.lessons.find((l) => l.id === lessonId);
+      if (found) {
+        targetLesson = found;
+        break;
+      }
+    }
+
+    if (!targetLesson) {
+      return res.status(404).json({ success: false, message: 'Lesson not found.' });
+    }
+
+    const progress = getStudentProgress(userId, course.id);
+    const existing = progress.lessonProgress[targetLesson.id] || {
+      secondsWatched: 0,
+      lastPosition: 0,
+      completed: false,
+    };
+
+    if (typeof secondsWatched === 'number') {
+      existing.secondsWatched = Math.max(existing.secondsWatched, secondsWatched);
+    }
+    if (typeof lastPosition === 'number') {
+      existing.lastPosition = lastPosition;
+    }
+
+    // Auto-complete rule (Section 7.1): Video/audio >= 90% watched, or manual mark
+    const ninetyPercent = (targetLesson.durationSeconds || 900) * 0.9;
+    const shouldComplete = markCompleted || (existing.secondsWatched >= ninetyPercent && targetLesson.durationSeconds > 0);
+
+    if (shouldComplete && !existing.completed) {
+      existing.completed = true;
+      existing.completedDate = new Date().toISOString();
+      if (!progress.completedLessonIds.includes(targetLesson.id)) {
+        progress.completedLessonIds.push(targetLesson.id);
+      }
+    }
+
+    progress.lessonProgress[targetLesson.id] = existing;
+    progress.lastOpenedLessonId = targetLesson.id;
+    progress.updatedAt = new Date().toISOString();
+
+    persistProgress();
+
+    // Recalculate full course & module progress
+    const enrollment = mockEnrollments.find((e) => e.userId === userId && e.courseId === course.id);
+    const summary = calculateCourseProgress(course, progress, enrollment?.enrolledDate);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Lesson progress saved.',
+      lessonProgress: existing,
+      courseProgress: summary,
+    });
+  } catch (error: any) {
+    console.error('Save lesson progress error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to record progress.' });
+  }
+});
+
+// 6. GET /api/courses/:courseId/modules/:moduleId/quiz (Quiz Questions WITHOUT Correct Answers - PDF Section 6.3 & 12.1)
+router.get('/:courseId/modules/:moduleId/quiz', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { courseId, moduleId } = req.params;
+
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found.' });
+
+    const targetModule = course.modules.find((m) => m.id === moduleId);
+    if (!targetModule || !targetModule.quiz) {
+      return res.status(404).json({ success: false, message: 'Quiz not found for this module.' });
+    }
+
+    const quiz = targetModule.quiz;
+    const progress = getStudentProgress(userId, course.id);
+
+    // Check attempts limit
+    const attempts = progress.quizAttempts[quiz.id] || [];
+    if (quiz.attemptsAllowed > 0 && attempts.length >= quiz.attemptsAllowed && !progress.passedQuizIds.includes(quiz.id)) {
+      return res.status(403).json({
+        success: false,
+        code: 'ATTEMPTS_EXHAUSTED',
+        message: `Maximum attempts (${quiz.attemptsAllowed}) reached for this quiz.`,
+      });
+    }
+
+    // SANITIZATION: Never send correct answers or explanations before submission! (Section 6.3)
+    let questionsToSend = quiz.questions.map((q) => ({
+      id: q.id,
+      type: q.type,
+      questionText: q.questionText,
+      imageUrl: q.imageUrl,
+      points: q.points,
+      position: q.position,
+      options: q.options.map((opt) => ({
+        id: opt.id,
+        optionText: opt.optionText,
+        position: opt.position,
+      })),
+    }));
+
+    if (quiz.shuffleQuestions) {
+      questionsToSend = questionsToSend.sort(() => Math.random() - 0.5);
+    }
+    if (quiz.shuffleOptions) {
+      for (const q of questionsToSend) {
+        q.options = q.options.sort(() => Math.random() - 0.5);
+      }
+    }
+
+    const savedAnswers = progress.savedQuizAnswers[quiz.id] || {};
+
+    return res.status(200).json({
+      success: true,
+      quiz: {
+        id: quiz.id,
+        moduleId: targetModule.id,
+        title: quiz.title,
+        instructions: quiz.instructions,
+        isRequired: quiz.isRequired,
+        passingPercent: quiz.passingPercent,
+        timeLimitMinutes: quiz.timeLimitMinutes,
+        attemptsAllowed: quiz.attemptsAllowed,
+        attemptNumber: attempts.length + 1,
+        questions: questionsToSend,
+        savedAnswers,
+        alreadyPassed: progress.passedQuizIds.includes(quiz.id),
+      },
+    });
+  } catch (error: any) {
+    console.error('Fetch quiz error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load quiz.' });
+  }
+});
+
+// 7. POST /api/courses/:courseId/modules/:moduleId/quiz/save-answer (Auto-Save Answers - PDF Section 6.3)
+router.post('/:courseId/modules/:moduleId/quiz/save-answer', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { courseId, moduleId } = req.params;
+    const { questionId, answer } = req.body;
+
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found.' });
+
+    const targetModule = course.modules.find((m) => m.id === moduleId);
+    if (!targetModule || !targetModule.quiz) {
+      return res.status(404).json({ success: false, message: 'Quiz not found.' });
+    }
+
+    const progress = getStudentProgress(userId, course.id);
+    if (!progress.savedQuizAnswers[targetModule.quiz.id]) {
+      progress.savedQuizAnswers[targetModule.quiz.id] = {};
+    }
+    progress.savedQuizAnswers[targetModule.quiz.id][questionId] = answer;
+    persistProgress();
+
+    return res.status(200).json({ success: true, message: 'Answer saved.' });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Failed to auto-save answer.' });
+  }
+});
+
+// 8. POST /api/courses/:courseId/modules/:moduleId/quiz/submit (Server-Side Grading - PDF Section 6.3 & 12.1)
+router.post('/:courseId/modules/:moduleId/quiz/submit', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const { courseId, moduleId } = req.params;
+    const { answers, timeTakenSeconds } = req.body; // answers is a map: { [questionId]: optionId | string | string[] }
+
+    const course = initialCourses.find((c) => c.id === courseId || c.slug === courseId);
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found.' });
+
+    const targetModule = course.modules.find((m) => m.id === moduleId);
+    if (!targetModule || !targetModule.quiz) {
+      return res.status(404).json({ success: false, message: 'Quiz not found.' });
+    }
+
+    const quiz = targetModule.quiz;
+    const progress = getStudentProgress(userId, course.id);
+
+    // Grade on server
+    let totalPoints = 0;
+    let earnedPoints = 0;
+    const reviewDetails: any[] = [];
+
+    for (const q of quiz.questions) {
+      totalPoints += q.points || 1;
+      const studentAnswer = answers ? answers[q.id] : undefined;
+      let isCorrect = false;
+
+      if (q.type === 'single_choice' || q.type === 'true_false') {
+        const correctOpt = q.options.find((o) => o.isCorrect);
+        isCorrect = correctOpt ? correctOpt.id === studentAnswer : false;
+      } else if (q.type === 'multiple_choice') {
+        const correctOptIds = q.options.filter((o) => o.isCorrect).map((o) => o.id);
+        const selectedIds = Array.isArray(studentAnswer) ? studentAnswer : studentAnswer ? [studentAnswer] : [];
+        const isMatch = correctOptIds.length === selectedIds.length && correctOptIds.every((id) => selectedIds.includes(id));
+        isCorrect = isMatch;
+      } else if (q.type === 'short_text') {
+        const accepted = q.acceptedShortAnswers || [];
+        const userText = typeof studentAnswer === 'string' ? studentAnswer.trim().toLowerCase() : '';
+        isCorrect = accepted.some((a) => a.trim().toLowerCase() === userText);
+      }
+
+      if (isCorrect) {
+        earnedPoints += q.points || 1;
+      }
+
+      // Review details based on showResultsMode
+      reviewDetails.push({
+        questionId: q.id,
+        questionText: q.questionText,
+        type: q.type,
+        isCorrect,
+        pointsEarned: isCorrect ? q.points : 0,
+        explanation: quiz.showResultsMode === 'score_and_explanations' ? q.explanation : undefined,
+        correctAnswer: quiz.showResultsMode !== 'score_only' ? q.options.filter((o) => o.isCorrect).map((o) => o.optionText) : undefined,
+      });
+    }
+
+    const scorePercent = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 100;
+    const passed = scorePercent >= quiz.passingPercent;
+
+    if (!progress.quizAttempts[quiz.id]) {
+      progress.quizAttempts[quiz.id] = [];
+    }
+    const attemptNumber = progress.quizAttempts[quiz.id].length + 1;
+    progress.quizAttempts[quiz.id].push({
+      attemptNumber,
+      scorePercent,
+      passed,
+      submittedDate: new Date().toISOString(),
+    });
+
+    if (passed && !progress.passedQuizIds.includes(quiz.id)) {
+      progress.passedQuizIds.push(quiz.id);
+    }
+
+    // Clear saved answers
+    delete progress.savedQuizAnswers[quiz.id];
+    progress.updatedAt = new Date().toISOString();
+    persistProgress();
+
+    // Recalculate progress
+    const enrollment = mockEnrollments.find((e) => e.userId === userId && e.courseId === course.id);
+    const summary = calculateCourseProgress(course, progress, enrollment?.enrolledDate);
+
+    return res.status(200).json({
+      success: true,
+      result: {
+        scorePercent,
+        passed,
+        passingPercent: quiz.passingPercent,
+        earnedPoints,
+        totalPoints,
+        attemptNumber,
+        showResultsMode: quiz.showResultsMode,
+        review: quiz.showResultsMode !== 'score_only' ? reviewDetails : undefined,
+      },
+      courseProgress: summary,
+    });
+  } catch (error: any) {
+    console.error('Submit quiz error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to grade quiz.' });
+  }
+});
+
+// 9. GET /api/courses/dashboard (Student Dashboard - PDF Section 7.4)
+router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const search = (req.query.search as string)?.toLowerCase().trim() || '';
+
+    const enrolledList = mockEnrollments.filter((e) => e.userId === userId && e.status === 'active');
+    const enrolledIds = enrolledList.map((e) => e.courseId);
+
+    const enrolledCourses = initialCourses
+      .filter((c) => enrolledIds.includes(c.id))
+      .filter((c) => !search || c.title.toLowerCase().includes(search) || c.category.toLowerCase().includes(search));
+
+    const processed = enrolledCourses.map((c) => {
+      const enr = enrolledList.find((e) => e.courseId === c.id);
+      const prog = getStudentProgress(userId, c.id);
+      const summary = calculateCourseProgress(c, prog, enr?.enrolledDate);
 
       return {
         ...c,
         isEnrolled: true,
         progress: {
-          completedLessons: progress.completedLessons,
-          totalLessons: progress.totalLessons,
-          percent: progress.percent,
-          isCompleted: progress.isCompleted,
-          lastOpenedLessonNumber: progress.lastOpenedLessonNumber,
-          lastOpenedLessonTitle: progress.lastOpenedLessonTitle,
+          completedLessons: summary.completedLessons,
+          totalLessons: summary.totalLessons,
+          percent: summary.percent,
+          isCompleted: summary.isCompleted,
+          timeWatchedFormatted: summary.timeWatchedFormatted,
+          timeRemainingFormatted: summary.timeRemainingFormatted,
+          paceIndicator: summary.paceIndicator,
+          lastOpenedLessonTitle: summary.currentLesson?.title || (c.modules[0]?.lessons[0]?.title ?? 'Start Lesson 1'),
+          lastOpenedLessonId: summary.currentLesson?.id || (c.modules[0]?.lessons[0]?.id ?? ''),
         },
       };
     });
 
-    // 3. Compute Stats strictly based on actual enrollments
-    const enrolledCoursesList = processedCourses;
-    const completedCoursesList = enrolledCoursesList.filter((c) => c.progress.isCompleted || c.progress.percent >= 100);
-    const inProgressCoursesList = enrolledCoursesList.filter((c) => !c.progress.isCompleted && c.progress.percent < 100);
-    const totalCompletedLessons = enrolledCoursesList.reduce((acc, cur) => acc + cur.progress.completedLessons, 0);
-    const totalMinutesWatched = enrolledCoursesList.reduce((acc, cur) => {
-      const prog = getUserCourseProgress(userId, cur, true);
-      return acc + (prog.totalTimeMinutes || 0);
-    }, 0);
-
-    const hours = Math.floor(totalMinutesWatched / 60);
-    const minutes = totalMinutesWatched % 60;
-    const learningTimeFormatted = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+    const completed = processed.filter((c) => c.progress.isCompleted || c.progress.percent >= 100);
+    const inProgress = processed.filter((c) => !c.progress.isCompleted && c.progress.percent < 100);
 
     const stats = {
-      enrolledCount: enrolledCoursesList.length,
-      completedLessonsCount: totalCompletedLessons,
-      learningTimeFormatted: learningTimeFormatted,
-      certificatesCount: completedCoursesList.length,
+      enrolledCount: processed.length,
+      completedLessonsCount: processed.reduce((acc, cur) => acc + cur.progress.completedLessons, 0),
+      learningTimeFormatted: `${Math.round(processed.reduce((acc, cur) => acc + (cur.progress.completedLessons * 25), 0) / 60)}h`,
+      certificatesCount: completed.length,
     };
-
-    // 4. Continue Learning Shortcut (FR-18)
-    let continueLearning = null;
-    if (enrolledCoursesList.length > 0) {
-      const activeCourse = inProgressCoursesList[0] || enrolledCoursesList[0];
-      const prog = activeCourse.progress;
-      const remainingMinutes = Math.max(0, (prog.totalLessons - prog.completedLessons) * 35);
-      const remHours = Math.floor(remainingMinutes / 60);
-      const remMins = remainingMinutes % 60;
-      const remainingTimeFormatted = `${remHours}h ${remMins}m remaining`;
-
-      continueLearning = {
-        courseId: activeCourse.id,
-        courseTitle: activeCourse.title,
-        series: activeCourse.series,
-        tagline: activeCourse.tagline,
-        lessonNumber: prog.lastOpenedLessonNumber,
-        lessonTitle: prog.lastOpenedLessonTitle,
-        completedLessons: prog.completedLessons,
-        totalLessons: prog.totalLessons,
-        percent: prog.percent,
-        remainingTime: remainingTimeFormatted,
-        gradientFrom: activeCourse.gradientFrom,
-        gradientTo: activeCourse.gradientTo,
-        accentColor: activeCourse.accentColor,
-      };
-    }
-
-    // 5. Apply Search if user searches within their enrolled courses
-    let filteredCourses = [...processedCourses];
-    if (searchQuery) {
-      filteredCourses = filteredCourses.filter(
-        (c) =>
-          c.title.toLowerCase().includes(searchQuery) ||
-          c.description.toLowerCase().includes(searchQuery) ||
-          c.instructor.toLowerCase().includes(searchQuery) ||
-          c.category.toLowerCase().includes(searchQuery) ||
-          c.series.toLowerCase().includes(searchQuery)
-      );
-    }
 
     return res.status(200).json({
       success: true,
       stats,
-      continueLearning,
-      courses: filteredCourses,
-      enrolledCourses: filteredCourses,
-      myLearnings: filteredCourses.filter((c) => !c.progress.isCompleted),
-      completedCourses: filteredCourses.filter((c) => c.progress.isCompleted || c.progress.percent >= 100),
+      courses: processed,
+      enrolledCourses: processed,
+      myLearnings: inProgress,
+      completedCourses: completed,
+      continueLearning: inProgress[0] || processed[0] || null,
       user: {
         id: req.user!.id,
         name: req.user!.name,
@@ -816,168 +2294,41 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
         avatarUrl: req.user!.avatarUrl,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Dashboard fetch error:', error);
     return res.status(500).json({ success: false, message: 'Failed to load dashboard data.' });
   }
 });
 
-// 2. POST /api/courses/:id/progress (Update lesson progress & Continue Learning shortcut)
-router.post('/:id/progress', authenticate, async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    const courseId = req.params.id;
-    const { lessonNumber, lessonTitle, markCompleted } = req.body;
-
-    const course = initialCourses.find((c) => c.id === courseId);
-    if (!course) {
-      return res.status(404).json({ success: false, message: 'Course not found' });
-    }
-
-    const key = `${userId}:${courseId}`;
-    const current = getUserCourseProgress(userId, course, true);
-
-    if (lessonNumber) {
-      current.lastOpenedLessonNumber = lessonNumber;
-    }
-    if (lessonTitle) {
-      current.lastOpenedLessonTitle = lessonTitle;
-    }
-    if (markCompleted) {
-      current.completedLessons = Math.min(course.lessonCount, current.completedLessons + 1);
-      current.percent = Math.round((current.completedLessons / course.lessonCount) * 100);
-      if (current.completedLessons >= course.lessonCount) {
-        current.isCompleted = true;
-      }
-      current.totalTimeMinutes += 30;
-    }
-    current.updatedAt = new Date();
-    mockProgressMap.set(key, current);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Progress recorded.',
-      progress: {
-        completedLessons: current.completedLessons,
-        totalLessons: current.totalLessons,
-        percent: current.percent,
-        isCompleted: current.isCompleted,
-        lastOpenedLessonNumber: current.lastOpenedLessonNumber,
-        lastOpenedLessonTitle: current.lastOpenedLessonTitle,
-      },
-    });
-  } catch (error) {
-    console.error('Update progress error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to record progress.' });
-  }
-});
-
-// 3. GET /api/courses (Public course list)
-router.get('/', async (req: Request, res: Response) => {
-  try {
-    if (isDatabaseConnected && db) {
-      const dbCourses = await db.select().from(schema.courses);
-      if (dbCourses && dbCourses.length > 0) {
-        return res.status(200).json({ success: true, courses: dbCourses });
-      }
-    }
-    return res.status(200).json({ success: true, courses: initialCourses });
-  } catch (error) {
-    console.error('Fetch courses error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch courses.' });
-  }
-});
-
-// 4. GET /api/courses/my-enrollments (Protected)
-router.get('/my-enrollments', authenticate, async (req: Request, res: Response) => {
-  try {
-    const userId = req.user!.id;
-    let enrolledCourseIds: string[] = [];
-
-    if (isDatabaseConnected && db && isValidUUID(userId)) {
-      try {
-        const records = await db
-          .select()
-          .from(schema.enrollments)
-          .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.status, 'active')));
-        enrolledCourseIds = records.map((r: any) => r.courseId);
-      } catch (dbErr: any) {
-        console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
-      }
-    }
-
-    const mockIds = mockEnrollments
-      .filter((e) => e.userId === userId && e.status === 'active')
-      .map((e) => e.courseId);
-
-    const mergedEnrolledIds = Array.from(new Set([...enrolledCourseIds, ...mockIds]));
-
-    return res.status(200).json({
-      success: true,
-      enrolledCourseIds: mergedEnrolledIds,
-    });
-  } catch (error) {
-    console.error('Fetch enrollments error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch enrollments.' });
-  }
-});
-
-// 5. POST /api/courses/:id/enroll (Protected - Enforces FR-7)
+// 10. POST /api/courses/:id/enroll (Protected - Enroll in course)
 router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;
     const courseId = req.params.id;
 
-    // Check user's email verification status (FR-7)
-    let emailVerified = req.user!.emailVerified;
-    if (isDatabaseConnected && db && isValidUUID(userId)) {
-      const u = await db.select({ emailVerified: schema.users.emailVerified }).from(schema.users).where(eq(schema.users.id, userId));
-      if (u && u[0]) emailVerified = u[0].emailVerified;
-    }
-
-    if (!emailVerified) {
+    if (!req.user!.emailVerified) {
       return res.status(403).json({
         success: false,
         code: 'EMAIL_NOT_VERIFIED',
-        message: 'Email verification is required before enrolling or purchasing courses. Please verify your email first.',
+        message: 'Please verify your email before enrolling in courses.',
       });
     }
 
     await enrollUserInCourse(userId, courseId);
 
-    // Initialize course progress
-    const course = initialCourses.find((c) => c.id === courseId);
-    if (course) {
-      getUserCourseProgress(userId, course, true);
-
-      // Record purchase dynamically for Admin Studio sales & analytics
-      const alreadyHasPurchase = mockPurchases.some((p) => p.userId === userId && p.courseId === courseId && p.status === 'paid');
-      if (!alreadyHasPurchase) {
-        mockPurchases.unshift({
-          id: 'pur-' + Date.now().toString(36),
-          userId,
-          studentName: req.user!.name,
-          studentEmail: req.user!.email,
-          courseId: course.id,
-          courseTitle: course.title,
-          amountCents: course.priceCents,
-          currency: course.currency || 'USD',
-          provider: 'cashfree',
-          status: 'paid',
-          createdAt: new Date().toISOString(),
-        });
-      }
-    }
-
     return res.status(200).json({
       success: true,
-      message: 'Successfully enrolled in course!',
+      message: 'Successfully enrolled!',
       courseId,
     });
   } catch (error: any) {
-    console.error('Enroll error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to complete enrollment.' });
+    return res.status(500).json({ success: false, message: 'Failed to enroll.' });
   }
+});
+
+// 11. Legacy compatibility endpoint GET /api/courses
+router.get('/', async (_req: Request, res: Response) => {
+  return res.status(200).json({ success: true, courses: initialCourses });
 });
 
 export default router;

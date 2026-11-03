@@ -22,6 +22,11 @@ import {
   Sparkles,
   X,
   CreditCard,
+  FileText,
+  Headphones,
+  Download,
+  HelpCircle,
+  Layers,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import CashfreeCheckoutModal from './CashfreeCheckoutModal';
@@ -29,17 +34,47 @@ import CashfreeCheckoutModal from './CashfreeCheckoutModal';
 interface Lesson {
   id: string;
   title: string;
-  lessonNumber: number;
+  description?: string;
+  type?: 'video' | 'audio' | 'article' | 'resource';
   duration: string;
+  durationSeconds?: number;
+  position?: number;
+  lessonNumber?: number;
   isFreePreview?: boolean;
+  isRequired?: boolean;
   videoUrl?: string;
+  mediaUrl?: string;
 }
 
-interface Section {
+interface ModuleTimeline {
+  id: string;
+  label?: string;
+  suggestedDuration?: string;
+  startOffsetDays?: number;
+  releaseMode?: string;
+  estimatedStudyTimeMinutes?: number;
+}
+
+interface ModuleQuiz {
   id: string;
   title: string;
-  order: number;
+  instructions?: string;
+  isRequired?: boolean;
+  questionCount?: number;
+  passingPercent?: number;
+  timeLimitMinutes?: number;
+}
+
+interface CourseModule {
+  id: string;
+  title: string;
+  description?: string;
+  objectives?: string[];
+  position?: number;
+  timeline?: ModuleTimeline;
+  lessonCount?: number;
   lessons: Lesson[];
+  quiz?: ModuleQuiz;
 }
 
 interface Review {
@@ -55,19 +90,24 @@ interface CourseDetail {
   id: string;
   slug: string;
   title: string;
+  subtitle?: string;
   description: string;
   instructor: string;
   instructorTitle: string;
   instructorBio?: string;
   instructorAvatar?: string;
   thumbnail: string;
+  banner?: string;
+  previewVideo?: string;
   priceCents: number;
   currency: string;
   category: string;
+  tags?: string[];
   level: string;
   durationHours: number;
   totalDuration: string;
   lessonCount: number;
+  moduleCount?: number;
   rating: number;
   reviewCount: number;
   series: string;
@@ -80,7 +120,8 @@ interface CourseDetail {
   outcomes?: string[];
   requirements?: string[];
   whoIsItFor?: string[];
-  sections?: Section[];
+  modules?: CourseModule[];
+  sections?: any[];
   reviews?: Review[];
   isEnrolled?: boolean;
 }
@@ -98,17 +139,16 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
   const [error, setError] = useState<string | null>(null);
 
   // Accordion open/collapse states
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const [openModules, setOpenModules] = useState<Record<string, boolean>>({});
 
-  // Free preview video modal (FR-20)
-  const [previewLesson, setPreviewLesson] = useState<{
-    lessonTitle: string;
-    courseTitle: string;
+  // Free preview video modal
+  const [previewVideoModal, setPreviewVideoModal] = useState<{
+    title: string;
     videoUrl: string;
-    duration: string;
+    subtitle?: string;
   } | null>(null);
 
-  // Cashfree Checkout modal state (FR-25, FR-26)
+  // Cashfree Checkout modal state
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [couponCodeInput, setCouponCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<string>('');
@@ -133,9 +173,11 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
       const data = await res.json();
       if (res.ok && data.success && data.course) {
         setCourse(data.course);
-        // Expand first section by default
-        if (data.course.sections && data.course.sections.length > 0) {
-          setOpenSections({ [data.course.sections[0].id]: true });
+        // Expand first module by default
+        if (data.course.modules && data.course.modules.length > 0) {
+          setOpenModules({ [data.course.modules[0].id]: true });
+        } else if (data.course.sections && data.course.sections.length > 0) {
+          setOpenModules({ [data.course.sections[0].id]: true });
         }
       } else {
         setError(data.message || 'Course details could not be found.');
@@ -148,53 +190,73 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
     }
   };
 
-  const toggleSection = (sectionId: string) => {
-    setOpenSections((prev) => ({
-      ...prev,
-      [sectionId]: !prev[sectionId],
-    }));
-  };
+  const isEnrolled = course
+    ? course.isEnrolled || enrolledCourses.includes(course.id) || (user && user.role === 'admin')
+    : false;
 
-  const openFreePreview = (lesson: Lesson) => {
-    if (!course) return;
-    setPreviewLesson({
-      lessonTitle: lesson.title,
-      courseTitle: course.title,
-      duration: lesson.duration,
-      videoUrl: lesson.videoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    });
+  const toggleModule = (modId: string) => {
+    setOpenModules((prev) => ({ ...prev, [modId]: !prev[modId] }));
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    }
   };
 
-  // Check if current user is enrolled
-  const isEnrolled = course ? enrolledCourses.includes(course.id) || !!course.isEnrolled : false;
+  const openFreePreview = (lesson: Lesson) => {
+    setPreviewVideoModal({
+      title: lesson.title,
+      videoUrl: lesson.videoUrl || lesson.mediaUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      subtitle: `${course?.title} · Free Preview`,
+    });
+  };
+
+  const openPromoVideo = () => {
+    if (course?.previewVideo) {
+      setPreviewVideoModal({
+        title: `${course.title} - Official Preview`,
+        videoUrl: course.previewVideo,
+        subtitle: course.subtitle || course.tagline,
+      });
+    } else {
+      // Fallback to first preview lesson
+      const firstPreview = displayModules
+        .flatMap((m) => m.lessons)
+        .find((l) => l.isFreePreview) || displayModules[0]?.lessons[0];
+      if (firstPreview) openFreePreview(firstPreview);
+    }
+  };
 
   const handleBuyClick = () => {
     if (!user) {
-      openAuthModal('signin');
+      openAuthModal('signup');
       return;
     }
     setCheckoutOpen(true);
   };
 
-  const handlePaymentSuccess = (orderId: string, courseSlug: string) => {
-    setCheckoutOpen(false);
-    if (course) {
-      enrollInCourse(course.id);
-    }
-    onNavigate(`/checkout/success?order_id=${encodeURIComponent(orderId)}&course_slug=${encodeURIComponent(courseSlug)}`);
-  };
+  // Harmonize modules list (supports both new multi-module structure and legacy sections)
+  const displayModules: CourseModule[] = course?.modules && course.modules.length > 0
+    ? course.modules
+    : course?.sections && course.sections.length > 0
+    ? course.sections.map((s: any, idx: number) => ({
+        id: s.id || `mod-${idx}`,
+        title: s.title || `Module ${idx + 1}`,
+        description: '',
+        objectives: [],
+        timeline: { id: `tl-${idx}`, label: `Week ${idx + 1}`, suggestedDuration: '3 days' },
+        lessons: s.lessons || [],
+      }))
+    : [];
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] py-16">
-        <div className="size-10 border-4 border-[#a435f0] border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-slate-500 text-sm font-medium">Loading course syllabus and details...</p>
+      <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <div className="size-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm">Loading course details...</p>
       </div>
     );
   }
@@ -261,7 +323,7 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
         </div>
       </div>
 
-      {/* 2. Dark Hero Header with Course Overview */}
+      {/* 2. Udemy/Coursera Style Hero Header (PDF Section 3) */}
       <div
         className="relative overflow-hidden text-white py-12 lg:py-16"
         style={{
@@ -280,8 +342,8 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
                   {course.badge}
                 </span>
               )}
-              <span className="bg-emerald-500/20 text-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded border border-emerald-400/30">
-                Cashfree Verified
+              <span className="bg-indigo-500/20 text-indigo-200 text-xs font-semibold px-2.5 py-0.5 rounded border border-indigo-400/30">
+                {course.level || 'Beginner'}
               </span>
             </div>
 
@@ -289,21 +351,22 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
               {course.title}
             </h1>
 
-            <p className="text-base sm:text-lg text-slate-200 font-normal leading-relaxed max-w-3xl">
-              {course.tagline || course.description}
+            {/* Subtitle: One-line promise (PDF Section 3) */}
+            <p className="text-base sm:text-xl text-indigo-100 font-medium leading-relaxed max-w-3xl">
+              {course.subtitle || course.tagline || 'Build practical mastery.'}
             </p>
 
-            {/* FR-21: Course Metadata Pill Row */}
+            {/* Metadata Pill Row */}
             <div className="flex flex-wrap items-center gap-4 sm:gap-6 pt-2 text-xs sm:text-sm text-slate-200">
               <div className="flex items-center gap-1.5 text-amber-300 font-bold">
                 <Star className="size-4 fill-amber-300" />
                 <span>{course.rating || 4.9}</span>
-                <span className="text-slate-300 font-normal">({course.reviewCount || 128} ratings)</span>
+                <span className="text-slate-300 font-normal">({course.reviewCount || 128} reviews)</span>
               </div>
 
               <div className="flex items-center gap-1.5">
                 <Users className="size-4 text-slate-300" />
-                <span>{(course.reviewCount || 128) * 4 + 48} students enrolled</span>
+                <span>{(course.reviewCount || 128) * 3 + 64} enrolled</span>
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -318,20 +381,19 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
             </div>
 
             <div className="text-xs sm:text-sm text-slate-300 pt-1">
-              Created by{' '}
-              <span className="font-bold text-white underline cursor-pointer">{course.instructor}</span>
+              Created by <span className="font-bold text-white underline">{course.instructor}</span>
               {course.instructorTitle ? `, ${course.instructorTitle}` : ''}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 3. Main Content Grid (Two Columns: Syllabus/Details + Sticky Buy Card) */}
+      {/* 3. Main Content Grid */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
-          {/* LEFT COLUMN: Course details (FR-19, FR-20, FR-23) */}
+          {/* LEFT COLUMN: Overview, Syllabus, Quizzes, Instructor */}
           <div className="lg:col-span-8 flex flex-col gap-10">
-            {/* FR-19: What You Will Learn Card */}
+            {/* What you will learn (Section 3 Checklist) */}
             {course.outcomes && course.outcomes.length > 0 && (
               <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 bg-slate-50/50 dark:bg-slate-900/30">
                 <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-5 flex items-center gap-2">
@@ -349,309 +411,244 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
               </div>
             )}
 
-            {/* FR-21: Course Highlights Bar */}
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-5 bg-white dark:bg-slate-900 grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="flex items-center gap-3">
-                <div className="size-10 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
-                  <Clock className="size-5" />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Duration</p>
-                  <p className="text-sm font-extrabold text-slate-900 dark:text-white">{course.totalDuration || `${course.durationHours || 6} hours`}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="size-10 rounded-lg bg-purple-50 dark:bg-purple-950/50 flex items-center justify-center text-purple-600 dark:text-purple-400 shrink-0">
-                  <BookOpen className="size-5" />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Lessons</p>
-                  <p className="text-sm font-extrabold text-slate-900 dark:text-white">{course.lessonCount || 12} modules</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="size-10 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                  <Award className="size-5" />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Level</p>
-                  <p className="text-sm font-extrabold text-slate-900 dark:text-white">{course.level || 'All Levels'}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="size-10 rounded-lg bg-amber-50 dark:bg-amber-950/50 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
-                  <ShieldCheck className="size-5" />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Certificate</p>
-                  <p className="text-sm font-extrabold text-slate-900 dark:text-white">Included</p>
-                </div>
+            {/* Course Description */}
+            <div className="flex flex-col gap-3">
+              <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">Description</h2>
+              <div className="text-sm sm:text-base text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line">
+                {course.description}
               </div>
             </div>
 
-            {/* FR-20: Curriculum Accordion with Lesson Durations and Free Preview */}
+            {/* Course Content / Module Hierarchy (PDF Section 2 & 4) */}
             <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
-                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">Course content</h2>
+                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">Course Content</h2>
                   <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    {course.sections ? `${course.sections.length} sections · ` : ''}
-                    {course.lessonCount} lessons · {course.durationHours || 6}h total length
+                    {displayModules.length} modules · {course.lessonCount} lessons · {course.totalDuration}
                   </p>
                 </div>
                 <button
                   onClick={() => {
-                    if (course.sections) {
-                      const allOpen = course.sections.every((s) => openSections[s.id]);
-                      const next: Record<string, boolean> = {};
-                      course.sections.forEach((s) => {
-                        next[s.id] = !allOpen;
-                      });
-                      setOpenSections(next);
-                    }
+                    const allOpen = displayModules.every((m) => openModules[m.id]);
+                    const next: Record<string, boolean> = {};
+                    displayModules.forEach((m) => {
+                      next[m.id] = !allOpen;
+                    });
+                    setOpenModules(next);
                   }}
                   className="text-xs font-bold text-[#a435f0] hover:text-[#8710d8] dark:text-[#c084fc] transition cursor-pointer"
                 >
-                  Expand / Collapse All
+                  Expand / Collapse All Modules
                 </button>
               </div>
 
-              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-800">
-                {course.sections && course.sections.length > 0 ? (
-                  course.sections.map((section) => {
-                    const isOpen = !!openSections[section.id];
-                    return (
-                      <div key={section.id} className="bg-white dark:bg-slate-900">
-                        {/* Section Header Accordion Trigger */}
-                        <button
-                          onClick={() => toggleSection(section.id)}
-                          className="w-full px-5 py-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition cursor-pointer"
-                        >
-                          <div className="flex items-center gap-3">
-                            {isOpen ? (
-                              <ChevronUp className="size-4 text-slate-500" />
-                            ) : (
-                              <ChevronDown className="size-4 text-slate-500" />
-                            )}
-                            <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                              {section.title}
-                            </span>
-                          </div>
-                          <span className="text-xs text-slate-400">
-                            {section.lessons.length} lessons
-                          </span>
-                        </button>
+              {/* Module Cards Accordion */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-800 shadow-xs">
+                {displayModules.map((module) => {
+                  const isOpen = !!openModules[module.id];
+                  const lessonCount = module.lessons ? module.lessons.length : 0;
+                  const timeline = module.timeline;
 
-                        {/* Lessons List inside Section */}
-                        {isOpen && (
-                          <div className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-slate-50/40 dark:bg-slate-900/40">
-                            {section.lessons.map((lesson) => (
+                  return (
+                    <div key={module.id} className="bg-white dark:bg-slate-900">
+                      {/* Module Header Trigger */}
+                      <button
+                        onClick={() => toggleModule(module.id)}
+                        className="w-full px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          {isOpen ? (
+                            <ChevronUp className="size-4 text-slate-500 shrink-0" />
+                          ) : (
+                            <ChevronDown className="size-4 text-slate-500 shrink-0" />
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2">
+                              {timeline?.label && (
+                                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                                  {timeline.label}
+                                </span>
+                              )}
+                              <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                                {module.title}
+                              </span>
+                            </div>
+                            {module.description && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">
+                                {module.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 text-xs text-slate-500 shrink-0 pl-7 sm:pl-0">
+                          {timeline?.suggestedDuration && (
+                            <span className="hidden md:inline bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-[11px]">
+                              {timeline.suggestedDuration}
+                            </span>
+                          )}
+                          <span>{lessonCount} lessons</span>
+                          {module.quiz && (
+                            <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                              · Quiz
+                            </span>
+                          )}
+                        </div>
+                      </button>
+
+                      {/* Expanded Module Lessons & Quiz */}
+                      {isOpen && (
+                        <div className="divide-y divide-slate-100 dark:divide-slate-800/60 bg-slate-50/40 dark:bg-slate-900/40">
+                          {/* Module Objectives Checklist if available */}
+                          {module.objectives && module.objectives.length > 0 && (
+                            <div className="px-6 py-3 bg-indigo-50/30 dark:bg-indigo-950/20 text-xs text-slate-600 dark:text-slate-300">
+                              <span className="font-bold text-indigo-600 dark:text-indigo-400 uppercase text-[10px] tracking-wider block mb-1">
+                                Module Learning Objectives:
+                              </span>
+                              <ul className="list-disc list-inside space-y-0.5">
+                                {module.objectives.map((obj, oIdx) => (
+                                  <li key={oIdx}>{obj}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {/* Lessons inside Module */}
+                          {module.lessons.map((lesson, lIdx) => {
+                            const isFree = !!lesson.isFreePreview;
+                            return (
                               <div
                                 key={lesson.id}
                                 className="px-6 py-3.5 flex items-center justify-between text-xs sm:text-sm hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition"
                               >
                                 <div className="flex items-center gap-3">
-                                  {lesson.isFreePreview ? (
+                                  {/* Lesson Type Icon */}
+                                  {lesson.type === 'article' ? (
+                                    <FileText className="size-4 text-amber-500 shrink-0" />
+                                  ) : lesson.type === 'audio' ? (
+                                    <Headphones className="size-4 text-purple-500 shrink-0" />
+                                  ) : lesson.type === 'resource' ? (
+                                    <Download className="size-4 text-blue-500 shrink-0" />
+                                  ) : (
+                                    <PlayCircle className="size-4 text-indigo-500 shrink-0" />
+                                  )}
+
+                                  {isFree ? (
                                     <button
                                       onClick={() => openFreePreview(lesson)}
-                                      className="text-[#a435f0] hover:text-[#8710d8] dark:text-[#c084fc] transition flex items-center gap-1.5 font-bold cursor-pointer"
-                                      title="Watch Free Preview"
+                                      className="text-left font-semibold text-slate-900 dark:text-white hover:text-[#a435f0] dark:hover:text-[#c084fc] transition cursor-pointer flex items-center gap-2"
                                     >
-                                      <PlayCircle className="size-4" />
-                                      <span className="text-slate-800 dark:text-slate-200 hover:text-[#a435f0] dark:hover:text-[#c084fc]">
-                                        {lesson.lessonNumber}. {lesson.title}
-                                      </span>
+                                      <span>{lIdx + 1}. {lesson.title}</span>
                                     </button>
                                   ) : (
                                     <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
                                       {isEnrolled ? (
-                                        <PlayCircle className="size-4 text-emerald-500 shrink-0" />
+                                        <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0" />
                                       ) : (
                                         <Lock className="size-3.5 text-slate-400 shrink-0" />
                                       )}
-                                      <span>
-                                        {lesson.lessonNumber}. {lesson.title}
-                                      </span>
+                                      <span>{lIdx + 1}. {lesson.title}</span>
                                     </div>
                                   )}
                                 </div>
 
                                 <div className="flex items-center gap-3 shrink-0">
-                                  {lesson.isFreePreview && (
+                                  {isFree && (
                                     <button
                                       onClick={() => openFreePreview(lesson)}
-                                      className="text-xs font-bold text-[#a435f0] dark:text-[#c084fc] hover:underline cursor-pointer"
+                                      className="text-[11px] font-bold text-[#a435f0] dark:text-[#c084fc] hover:underline cursor-pointer"
                                     >
-                                      Preview Free
+                                      Preview
                                     </button>
                                   )}
                                   <span className="text-slate-400 text-xs">{lesson.duration}</span>
                                 </div>
                               </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="p-6 text-center text-slate-500 text-sm">
-                    Curriculum outline being updated.
-                  </div>
-                )}
+                            );
+                          })}
+
+                          {/* Module Quiz Card */}
+                          {module.quiz && (
+                            <div className="px-6 py-3.5 flex items-center justify-between text-xs sm:text-sm bg-purple-50/40 dark:bg-purple-950/20">
+                              <div className="flex items-center gap-3 text-purple-900 dark:text-purple-300 font-bold">
+                                <HelpCircle className="size-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                                <span>{module.quiz.title}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs text-purple-700 dark:text-purple-400">
+                                <span>{module.quiz.questionCount || 3} questions</span>
+                                <span>· Pass: {module.quiz.passingPercent || 70}%</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* FR-19: Requirements & Who It Is For */}
+            {/* Requirements & Target Audience (Section 3) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Requirements */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-6 bg-white dark:bg-slate-900">
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-3">
                   Requirements
                 </h3>
-                <ul className="space-y-2.5 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
+                <ul className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
                   {(course.requirements || [
-                    'Basic computer and browser knowledge',
+                    'Basic computer literacy and a modern web browser',
                     'Dedication to complete hands-on assignments',
                   ]).map((req, i) => (
                     <li key={i} className="flex items-start gap-2">
-                      <span className="text-slate-400">•</span>
+                      <span className="text-indigo-500 font-bold">•</span>
                       <span>{req}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              {/* Who It Is For */}
+              {/* Who this course is for */}
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-6 bg-white dark:bg-slate-900">
                 <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-3">
                   Who this course is for
                 </h3>
-                <ul className="space-y-2.5 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
+                <ul className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
                   {(course.whoIsItFor || [
-                    'Students and job-seekers targeting high-growth companies',
-                    'Working professionals looking to switch or advance their careers',
-                  ]).map((audience, i) => (
+                    'Early-career professionals looking to level up their skills',
+                    'Developers and designers building production systems',
+                  ]).map((aud, i) => (
                     <li key={i} className="flex items-start gap-2">
-                      <span className="text-slate-400">•</span>
-                      <span>{audience}</span>
+                      <span className="text-indigo-500 font-bold">•</span>
+                      <span>{aud}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             </div>
 
-            {/* FR-19: Instructor Bio Section */}
+            {/* Instructor Bio Section */}
             <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-8 bg-white dark:bg-slate-900">
               <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-4">Instructor</h2>
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-4">
                 <img
-                  src={
-                    course.instructorAvatar ||
-                    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'
-                  }
+                  src={course.instructorAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80'}
                   alt={course.instructor}
-                  className="size-16 sm:size-20 rounded-full object-cover border-2 border-[#a435f0]/30 shadow-sm"
+                  className="size-16 rounded-full object-cover ring-2 ring-indigo-600/20"
                 />
                 <div>
-                  <h3 className="font-bold text-lg text-slate-900 dark:text-white">{course.instructor}</h3>
+                  <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">{course.instructor}</h3>
                   <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{course.instructorTitle}</p>
-                  <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500">
-                    <span className="flex items-center gap-1 font-semibold text-amber-500">
-                      ★ {course.rating || 4.9} Instructor Rating
-                    </span>
-                    <span>·</span>
-                    <span>{course.reviewCount || 128} Reviews</span>
-                  </div>
                 </div>
               </div>
               <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                {course.instructorBio ||
-                  `${course.instructor} brings years of production engineering and leadership experience. Dedicated to practical learning, real-world case studies, and mentorship for next-generation talent.`}
+                {course.instructorBio}
               </p>
-            </div>
-
-            {/* FR-23: Reviews and Ratings Section */}
-            <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-8 bg-white dark:bg-slate-900 flex flex-col gap-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Star className="size-5 fill-amber-400 text-amber-400" />
-                    Student Reviews & Feedback
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">Verified reviews from enrolled learners</p>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-extrabold text-slate-900 dark:text-white">
-                    {course.rating || 4.9}
-                  </span>
-                  <div className="flex text-amber-400">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star key={s} className="size-4 fill-amber-400" />
-                    ))}
-                  </div>
-                  <span className="text-xs text-slate-400">({course.reviewCount || 128})</span>
-                </div>
-              </div>
-
-              {/* Individual Reviews */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(course.reviews && course.reviews.length > 0
-                  ? course.reviews
-                  : [
-                      {
-                        id: 'r1',
-                        studentName: 'Alex Rivera',
-                        studentRole: 'Junior Frontend Developer',
-                        rating: 5,
-                        reviewText:
-                          'Super practical and direct. The curriculum covered real company workflows rather than trivial hello-world examples.',
-                        date: '2 weeks ago',
-                      },
-                      {
-                        id: 'r2',
-                        studentName: 'Priya Sharma',
-                        studentRole: 'UX / Product Designer',
-                        rating: 5,
-                        reviewText:
-                          'Worth every dollar. The lessons helped me land multiple interviews and showcase a portfolio piece that impressed interviewers.',
-                        date: '1 month ago',
-                      },
-                    ]
-                ).map((rev) => (
-                  <div
-                    key={rev.id}
-                    className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <p className="font-bold text-sm text-slate-900 dark:text-white">{rev.studentName}</p>
-                          {rev.studentRole && (
-                            <p className="text-[11px] text-slate-400">{rev.studentRole}</p>
-                          )}
-                        </div>
-                        <div className="flex text-amber-400">
-                          {Array.from({ length: rev.rating }).map((_, i) => (
-                            <Star key={i} className="size-3 fill-amber-400" />
-                          ))}
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed italic">
-                        "{rev.reviewText}"
-                      </p>
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-3">{rev.date}</p>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
 
-          {/* RIGHT COLUMN: Sticky Buy Card (FR-22, FR-24, FR-31, FR-32) */}
+          {/* RIGHT COLUMN: Sticky Purchase Card */}
           <div className="lg:col-span-4 lg:sticky lg:top-24 flex flex-col gap-4">
             <div className="border border-slate-200 dark:border-slate-800 rounded-2xl p-6 bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none flex flex-col gap-5">
               {/* Card Thumbnail / Preview trigger */}
@@ -663,23 +660,19 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
                 />
                 <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
                   <button
-                    onClick={() => {
-                      const firstPreview = course.sections
-                        ?.flatMap((s) => s.lessons)
-                        .find((l) => l.isFreePreview) || course.sections?.[0]?.lessons?.[0];
-                      if (firstPreview) openFreePreview(firstPreview);
-                    }}
+                    onClick={openPromoVideo}
                     className="size-12 rounded-full bg-white/90 text-slate-900 flex items-center justify-center shadow-lg hover:scale-110 transition cursor-pointer"
+                    title="Watch Course Preview"
                   >
                     <PlayCircle className="size-6 text-[#a435f0]" />
                   </button>
                 </div>
                 <div className="absolute bottom-2 left-2 bg-black/70 text-white text-[10px] font-bold px-2 py-0.5 rounded">
-                  Free Preview Available
+                  Course Preview
                 </div>
               </div>
 
-              {/* Price display (FR-22: 200 USD) */}
+              {/* Price display */}
               <div className="flex items-baseline justify-between">
                 <div>
                   <span className="text-3xl font-extrabold text-slate-900 dark:text-white">
@@ -697,13 +690,13 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
                 <div className="flex flex-col gap-2">
                   <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-2.5 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
                     <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-                    <span>You own this course! Full access is unlocked.</span>
+                    <span>You are enrolled! Full course access is active.</span>
                   </div>
                   <button
                     onClick={() => onNavigate('/dashboard')}
                     className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
                   >
-                    <span>Go to My Learnings</span>
+                    <span>Enter Classroom</span>
                     <span>→</span>
                   </button>
                 </div>
@@ -723,15 +716,15 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
                 </div>
               )}
 
-              {/* FR-24: Refund Policy Summary Near Buy Button */}
+              {/* Guarantee */}
               <div className="flex items-center gap-2.5 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
                 <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
                 <span className="leading-snug">
-                  <strong>30-Day Money-Back Guarantee</strong>. Full refund anytime if you are not 100% satisfied.
+                  <strong>30-Day Money-Back Guarantee</strong>. Full refund anytime if not satisfied.
                 </span>
               </div>
 
-              {/* FR-31: Coupon Code Box */}
+              {/* Promo Coupon Box */}
               {!isEnrolled && (
                 <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
                   <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 block">
@@ -750,97 +743,80 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
                     </div>
                     <button
                       onClick={() => {
-                        if (couponCodeInput.trim()) {
-                          setAppliedPromo(couponCodeInput.trim());
-                          setCheckoutOpen(true);
+                        if (couponCodeInput === 'WELCOME20' || couponCodeInput === 'INTERN50') {
+                          setAppliedPromo(couponCodeInput);
+                        } else {
+                          alert('Invalid coupon code. Try WELCOME20 or INTERN50');
                         }
                       }}
-                      className="px-3 py-1.5 text-xs font-bold bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition cursor-pointer"
+                      className="px-3 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-xs font-bold rounded-lg transition"
                     >
                       Apply
                     </button>
                   </div>
+                  {appliedPromo && (
+                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
+                      Coupon {appliedPromo} applied!
+                    </p>
+                  )}
                 </div>
               )}
 
-              {/* What is Included Checklist */}
-              <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
-                <p className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider mb-3">
-                  This course includes:
-                </p>
-                <ul className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
-                  <li className="flex items-center gap-2">
-                    <PlayCircle className="size-3.5 text-indigo-500" />
-                    <span>{course.totalDuration || `${course.durationHours || 6} hours`} on-demand HD video</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <BookOpen className="size-3.5 text-indigo-500" />
-                    <span>{course.lessonCount} downloadable resources & code</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Globe className="size-3.5 text-indigo-500" />
-                    <span>Full lifetime access on desktop & mobile</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Award className="size-3.5 text-indigo-500" />
-                    <span>Verifiable Certificate of Completion</span>
-                  </li>
-                </ul>
+              {/* Course Features List */}
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 flex flex-col gap-2.5 text-xs text-slate-600 dark:text-slate-300">
+                <div className="flex items-center gap-2">
+                  <Clock className="size-4 text-slate-400" />
+                  <span>{course.totalDuration} on-demand video</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Layers className="size-4 text-slate-400" />
+                  <span>{displayModules.length} comprehensive modules</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <BookOpen className="size-4 text-slate-400" />
+                  <span>Articles, quizzes & downloadable code templates</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Award className="size-4 text-slate-400" />
+                  <span>Verified certificate of completion</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* FR-20: Free Lesson Preview Modal Player */}
-      {previewLesson && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl">
-            <div className="px-5 py-3.5 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+      {/* Preview Video Modal */}
+      {previewVideoModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 text-white rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl border border-slate-800">
+            <div className="p-4 flex items-center justify-between border-b border-slate-800">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
-                  Free Preview
-                </span>
-                <h3 className="font-bold text-white text-sm sm:text-base mt-1">
-                  {previewLesson.lessonTitle}
-                </h3>
+                <h3 className="font-extrabold text-sm">{previewVideoModal.title}</h3>
+                {previewVideoModal.subtitle && (
+                  <p className="text-xs text-slate-400">{previewVideoModal.subtitle}</p>
+                )}
               </div>
               <button
-                onClick={() => setPreviewLesson(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700 transition cursor-pointer"
+                onClick={() => setPreviewVideoModal(null)}
+                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
               >
                 <X className="size-5" />
               </button>
             </div>
-
             <div className="aspect-video bg-black flex items-center justify-center">
               <video
-                src={previewLesson.videoUrl}
+                src={previewVideoModal.videoUrl}
                 controls
                 autoPlay
                 className="w-full h-full object-contain"
-              >
-                Your browser does not support HTML5 video preview.
-              </video>
-            </div>
-
-            <div className="p-4 bg-slate-900 flex items-center justify-between text-xs text-slate-400">
-              <span>Duration: {previewLesson.duration}</span>
-              <button
-                onClick={() => {
-                  setPreviewLesson(null);
-                  handleBuyClick();
-                }}
-                className="font-bold text-white bg-[#a435f0] hover:bg-[#8710d8] px-4 py-1.5 rounded-lg transition cursor-pointer"
-              >
-                Enroll to unlock full course
-              </button>
+              />
             </div>
           </div>
         </div>
       )}
 
-      {/* Cashfree Payment Gateway Checkout Modal (FR-25, FR-26) */}
+      {/* Cashfree Checkout Modal */}
       {checkoutOpen && course && (
         <CashfreeCheckoutModal
           isOpen={checkoutOpen}
@@ -853,8 +829,12 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
             thumbnail: course.thumbnail,
             instructor: course.instructor,
           }}
-          initialCouponCode={appliedPromo || couponCodeInput}
-          onPaymentSuccess={handlePaymentSuccess}
+          initialCouponCode={appliedPromo}
+          onPaymentSuccess={() => {
+            setCheckoutOpen(false);
+            enrollInCourse(course.id);
+            fetchCourseDetails();
+          }}
         />
       )}
     </div>
