@@ -20,6 +20,7 @@ interface NavbarProps {
   currentPath: string;
   navigate: (path: string) => void;
   user: any;
+  adminUser?: any;
   enrolledCoursesCount: number;
   courses?: any[];
   onOpenAuth: (mode: 'signin' | 'signup' | 'verify') => void;
@@ -33,6 +34,7 @@ export default function Navbar({
   currentPath,
   navigate,
   user,
+  adminUser,
   enrolledCoursesCount,
   courses = [],
   onOpenAuth,
@@ -76,7 +78,7 @@ export default function Navbar({
 
   const isDashboard = currentPath.startsWith('/dashboard');
   const isAdmin = currentPath.startsWith('/admin');
-  const isStrictAdmin = user && user.role === 'admin';
+  const isStrictAdmin = (adminUser && adminUser.role === 'admin') || (user && user.role === 'admin');
 
   return (
     <header
@@ -318,6 +320,20 @@ export default function Navbar({
             </div>
           ) : (
             <div className="hidden sm:flex items-center gap-2">
+              {isStrictAdmin && (
+                <button
+                  onClick={() => navigate(isAdmin ? '/' : '/admin')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
+                    isAdmin
+                      ? 'bg-rose-600 text-white shadow-xs border-transparent'
+                      : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 hover:bg-rose-100 border-rose-300 dark:border-rose-800'
+                  }`}
+                  title="InternWala Restricted Admin Studio"
+                >
+                  <ShieldCheck className="size-4 text-rose-500" />
+                  <span>{isAdmin ? 'Exit Studio' : 'Admin Studio'}</span>
+                </button>
+              )}
               <button
                 onClick={() => onOpenAuth('signin')}
                 className="border border-[#2d2f31] dark:border-slate-600 font-bold text-[13px] text-[#2d2f31] dark:text-white hover:bg-slate-50 dark:hover:bg-slate-800 px-3.5 py-2 rounded-[4px] transition cursor-pointer"

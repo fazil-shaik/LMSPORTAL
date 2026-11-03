@@ -21,7 +21,7 @@ export const certificateStatusEnum = pgEnum('certificate_status', ['valid', 'rev
 
 // 1. Users Table
 export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   name: varchar('name', { length: 255 }).notNull(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: text('password_hash').notNull(),
@@ -37,7 +37,7 @@ export const users = pgTable('users', {
 
 // 2. Courses Table (PDF Section 3 & 11)
 export const courses = pgTable('courses', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   slug: varchar('slug', { length: 255 }).notNull().unique(),
   title: varchar('title', { length: 255 }).notNull(),
   subtitle: text('subtitle'), // Subtitle is a one-line promise
@@ -76,7 +76,7 @@ export const courses = pgTable('courses', {
 
 // 3. Modules Table (PDF Section 4 & 11)
 export const modules = pgTable('modules', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description').default('').notNull(), // Rich text short summary
@@ -92,7 +92,7 @@ export const modules = pgTable('modules', {
 
 // 4. Module Timelines Table (PDF Section 5 & 11)
 export const moduleTimelines = pgTable('module_timelines', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }).notNull().unique(),
   label: varchar('label', { length: 100 }).default('Week 1'), // Optional display label e.g. Week 1, Phase 2
   suggestedDuration: varchar('suggested_duration', { length: 100 }).default('3 days'), // e.g. 3 days, 1 week
@@ -107,7 +107,7 @@ export const moduleTimelines = pgTable('module_timelines', {
 
 // 5. Lessons Table (PDF Section 4.1 & 11)
 export const lessons = pgTable('lessons', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }).notNull(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description').default(''),
@@ -129,7 +129,7 @@ export const lessons = pgTable('lessons', {
 
 // 6. Media Assets Table (PDF Section 10 & 11)
 export const mediaAssets = pgTable('media_assets', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   publicId: varchar('public_id', { length: 255 }).notNull(),
   resourceType: varchar('resource_type', { length: 50 }).default('image').notNull(), // image, video, raw, audio
   deliveryType: varchar('delivery_type', { length: 50 }).default('public').notNull(), // public or authenticated
@@ -143,7 +143,7 @@ export const mediaAssets = pgTable('media_assets', {
 
 // 7. Lesson Resources Table (PDF Section 11)
 export const lessonResources = pgTable('lesson_resources', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   lessonId: uuid('lesson_id').references(() => lessons.id, { onDelete: 'cascade' }),
   moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }),
   title: varchar('title', { length: 255 }).notNull(),
@@ -155,7 +155,7 @@ export const lessonResources = pgTable('lesson_resources', {
 
 // 8. Quizzes Table (PDF Section 6 & 11)
 export const quizzes = pgTable('quizzes', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }).notNull().unique(),
   title: varchar('title', { length: 255 }).notNull(),
   instructions: text('instructions').default(''),
@@ -175,7 +175,7 @@ export const quizzes = pgTable('quizzes', {
 
 // 9. Quiz Questions Table (PDF Section 6.2 & 11)
 export const quizQuestions = pgTable('quiz_questions', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   quizId: uuid('quiz_id').references(() => quizzes.id, { onDelete: 'cascade' }).notNull(),
   type: varchar('type', { length: 50 }).default('single_choice').notNull(), // single_choice, multiple_choice, true_false, short_text
   questionText: text('question_text').notNull(),
@@ -190,7 +190,7 @@ export const quizQuestions = pgTable('quiz_questions', {
 
 // 10. Quiz Options Table (PDF Section 6.2 & 11)
 export const quizOptions = pgTable('quiz_options', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   questionId: uuid('question_id').references(() => quizQuestions.id, { onDelete: 'cascade' }).notNull(),
   optionText: text('option_text').notNull(),
   isCorrect: boolean('is_correct').default(false).notNull(),
@@ -200,7 +200,7 @@ export const quizOptions = pgTable('quiz_options', {
 
 // 11. Purchases Table
 export const purchases = pgTable('purchases', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   amount: integer('amount').notNull(),
@@ -219,7 +219,7 @@ export const purchases = pgTable('purchases', {
 
 // 12. Coupons Table
 export const coupons = pgTable('coupons', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   code: varchar('code', { length: 50 }).notNull().unique(),
   discountPercent: integer('discount_percent').default(0).notNull(),
   discountAmountCents: integer('discount_amount_cents').default(0).notNull(),
@@ -232,7 +232,7 @@ export const coupons = pgTable('coupons', {
 
 // 13. Course Reviews Table
 export const courseReviews = pgTable('course_reviews', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
   studentName: varchar('student_name', { length: 255 }).notNull(),
@@ -244,7 +244,7 @@ export const courseReviews = pgTable('course_reviews', {
 
 // 14. Enrollments Table (PDF Section 11)
 export const enrollments = pgTable('enrollments', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   purchaseId: uuid('purchase_id').references(() => purchases.id, { onDelete: 'set null' }),
@@ -256,7 +256,7 @@ export const enrollments = pgTable('enrollments', {
 
 // 15. Lesson Progress Table (PDF Section 7.1 & 11)
 export const lessonProgress = pgTable('lesson_progress', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   lessonId: uuid('lesson_id').references(() => lessons.id, { onDelete: 'cascade' }).notNull(),
   secondsWatched: integer('seconds_watched').default(0).notNull(),
@@ -269,7 +269,7 @@ export const lessonProgress = pgTable('lesson_progress', {
 
 // 16. Module Progress Table (PDF Section 7.2 & 11)
 export const moduleProgress = pgTable('module_progress', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   moduleId: uuid('module_id').references(() => modules.id, { onDelete: 'cascade' }).notNull(),
   percent: integer('percent').default(0).notNull(),
@@ -283,7 +283,7 @@ export const moduleProgress = pgTable('module_progress', {
 
 // 17. Course Progress Table (PDF Section 7.3 & 11)
 export const courseProgress = pgTable('course_progress', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   percent: integer('percent').default(0).notNull(),
@@ -297,7 +297,7 @@ export const courseProgress = pgTable('course_progress', {
 
 // 18. Quiz Attempts Table (PDF Section 6.3 & 11)
 export const quizAttempts = pgTable('quiz_attempts', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   quizId: uuid('quiz_id').references(() => quizzes.id, { onDelete: 'cascade' }).notNull(),
   attemptNumber: integer('attempt_number').default(1).notNull(),
@@ -312,7 +312,7 @@ export const quizAttempts = pgTable('quiz_attempts', {
 
 // 19. Quiz Attempt Answers Table (PDF Section 11)
 export const quizAttemptAnswers = pgTable('quiz_attempt_answers', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   attemptId: uuid('attempt_id').references(() => quizAttempts.id, { onDelete: 'cascade' }).notNull(),
   questionId: uuid('question_id').references(() => quizQuestions.id, { onDelete: 'cascade' }).notNull(),
   selectedOptionIds: jsonb('selected_option_ids').$type<any>().default([]),
@@ -323,7 +323,7 @@ export const quizAttemptAnswers = pgTable('quiz_attempt_answers', {
 
 // 20. Completion Forms Table
 export const completionForms = pgTable('completion_forms', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
   rating: integer('rating').notNull(),
@@ -333,7 +333,7 @@ export const completionForms = pgTable('completion_forms', {
 
 // 21. Certificates Table
 export const certificates = pgTable('certificates', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   certificateCode: varchar('certificate_code', { length: 50 }).notNull().unique(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   courseId: uuid('course_id').references(() => courses.id, { onDelete: 'cascade' }).notNull(),
@@ -344,7 +344,7 @@ export const certificates = pgTable('certificates', {
 
 // 22. WebhookEvent Table
 export const webhookEvents = pgTable('webhook_events', {
-  id: uuid('id').defaultRandom().primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey().notNull(),
   providerEventId: varchar('provider_event_id', { length: 255 }).notNull().unique(),
   type: varchar('type', { length: 100 }).notNull(),
   processed: boolean('processed').default(false).notNull(),

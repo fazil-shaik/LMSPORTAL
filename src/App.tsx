@@ -81,7 +81,7 @@ export default function App() {
   }, []);
 
   // 4. Auth Context
-  const { user, openAuthModal, openSettingsModal, signOut, enrolledCourses, enrollInCourse } = useAuth();
+  const { user, adminUser, openAuthModal, openSettingsModal, signOut, enrolledCourses, enrollInCourse } = useAuth();
 
   // Auto-redirect to /dashboard when user logs in from landing page
   useEffect(() => {
@@ -138,6 +138,7 @@ export default function App() {
         currentPath={currentPath}
         navigate={navigate}
         user={user}
+        adminUser={adminUser}
         enrolledCoursesCount={enrolledCourses.length}
         courses={landingCourses}
         onOpenAuth={openAuthModal}

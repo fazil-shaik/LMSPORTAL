@@ -9,7 +9,7 @@ interface AdminGuardProps {
 }
 
 export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuardProps) {
-  const { user, signIn } = useAuth();
+  const { adminUser, adminSignIn, adminLoading } = useAuth();
 
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -17,8 +17,8 @@ export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuard
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // STRICT CHECK: Is the user signed in AND strictly an admin?
-  const isAuthorizedAdmin = user && user.role === 'admin';
+  // STRICT CHECK: Is the admin user signed in AND strictly an admin?
+  const isAuthorizedAdmin = !!adminUser && adminUser.role === 'admin';
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,7 +26,11 @@ export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuard
     setIsSubmitting(true);
 
     try {
-      const result = await signIn(adminEmail, adminPassword, false, adminSecretKey.trim() || undefined);
+      const result = await adminSignIn(
+        adminEmail.trim(),
+        adminPassword,
+        adminSecretKey.trim() || undefined
+      );
       if (!result.success) {
         setLoginError(result.message || 'Administrative credentials verification failed.');
       }
@@ -43,7 +47,21 @@ export default function AdminGuard({ onBackToApp, onCourseModified }: AdminGuard
     setAdminSecretKey('internwala_admin_2026');
   };
 
-  // If the user is authenticated and verified as admin, render Admin Studio directly!
+  // While verifying admin session on page refresh, show clean loading state
+  if (adminLoading) {
+    return (
+      <div className="min-h-screen bg-[#07090e] text-white flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3 bg-[#0f131f] border border-slate-800 rounded-2xl p-8 shadow-2xl">
+          <div className="size-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-semibold text-slate-400 tracking-wide">
+            Verifying Administrator Security Session...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // If the admin user is authenticated and verified as admin, render Admin Studio directly!
   if (isAuthorizedAdmin) {
     return <AdminPanel onBackToApp={onBackToApp} onCourseModified={onCourseModified} />;
   }

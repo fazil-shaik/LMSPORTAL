@@ -165,7 +165,7 @@ export default function CourseDetailPage({ slug, onBack, onNavigate }: CourseDet
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 

@@ -127,7 +127,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
   // 1. Fetch full learning context
   const fetchClassroom = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const res = await fetch(`/api/courses/${courseId}/learn`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -184,7 +184,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
     setActiveLessonId(lessonId);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const res = await fetch(`/api/courses/${courseId}/lessons/${lessonId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -212,7 +212,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
   const saveLessonProgress = async (currentSec: number, markComplete: boolean = false) => {
     if (!activeLessonId) return;
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const res = await fetch(`/api/courses/${courseId}/lessons/${activeLessonId}/progress`, {
         method: 'POST',
         headers: {
@@ -285,7 +285,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
     setQuizResult(null);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const res = await fetch(`/api/courses/${courseId}/modules/${moduleId}/quiz`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -330,7 +330,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
 
     if (activeQuizModuleId) {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('student_token') || localStorage.getItem('token');
         await fetch(`/api/courses/${courseId}/modules/${activeQuizModuleId}/quiz/save-answer`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -348,7 +348,7 @@ export default function CourseClassroom({ courseId, onBackToDashboard }: Classro
     setSubmittingQuiz(true);
 
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const res = await fetch(`/api/courses/${courseId}/modules/${activeQuizModuleId}/quiz/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

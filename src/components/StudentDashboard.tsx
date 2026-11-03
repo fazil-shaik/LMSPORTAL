@@ -64,7 +64,7 @@ interface StudentDashboardProps {
 }
 
 export default function StudentDashboard({ onBackToExplore }: StudentDashboardProps) {
-  const { user, openAuthModal } = useAuth();
+  const { user, adminUser, openAuthModal } = useAuth();
 
   // Search filter inside student's enrolled courses
   const [searchQuery, setSearchQuery] = useState('');
@@ -107,9 +107,12 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
         search: searchQuery,
       });
 
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['X-Student-Token'] = token;
+      }
 
       const res = await fetch(`/api/courses/dashboard?${params.toString()}`, {
         credentials: 'include',
@@ -245,7 +248,7 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
             </div>
 
             <div className="flex items-center gap-2 self-start sm:self-auto">
-              {user && user.role === 'admin' && (
+              {(adminUser?.role === 'admin' || user?.role === 'admin') && (
                 <button
                   onClick={() => {
                     window.history.pushState({}, '', '/admin');

@@ -1703,7 +1703,7 @@ router.get('/detail/:slug', async (req: Request, res: Response) => {
     let userId: string | null = null;
 
     try {
-      const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
+      const token = (req.headers['x-student-token'] as string) || req.cookies?.student_token || req.cookies?.access_token || req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
       if (token) {
         const decoded: any = (await import('jsonwebtoken')).default.verify(
           token,
@@ -2234,6 +2234,21 @@ router.post('/:courseId/modules/:moduleId/quiz/submit', authenticate, async (req
 });
 
 // 9. GET /api/courses/dashboard (Student Dashboard - PDF Section 7.4)
+// GET /api/courses/my-enrollments (Returns list of course IDs student is actively enrolled in)
+router.get('/my-enrollments', authenticate, async (req: Request, res: Response) => {
+  try {
+    const userId = req.user!.id;
+    const enrolledList = mockEnrollments.filter((e) => e.userId === userId && e.status === 'active');
+    const enrolledCourseIds = enrolledList.map((e) => e.courseId);
+    return res.status(200).json({
+      success: true,
+      enrolledCourseIds,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to retrieve enrollments' });
+  }
+});
+
 router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;

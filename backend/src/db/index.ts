@@ -251,11 +251,16 @@ export async function ensureDatabaseSchema(sql: any): Promise<void> {
       );
     `;
 
-    // 14. Add any missing columns to enrollments, purchases, coupons, reviews
+    // 14. Add any missing columns to enrollments, purchases, coupons, reviews, course_progress, lessons
     await sql`ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS completed_date TIMESTAMP;`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS percent INTEGER DEFAULT 0;`;
     await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS time_watched INTEGER DEFAULT 0;`;
     await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS current_lesson_id UUID;`;
     await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'not_started';`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`;
+    await sql`ALTER TABLE course_progress ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();`;
+    await sql`ALTER TABLE lessons ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();`;
 
     console.log('[Neon PostgreSQL] Schema auto-migrated successfully (all LMS course structure tables & columns verified).');
   } catch (err: any) {

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, authenticateAdmin } from '../middleware/auth.js';
 import {
   initialCourses,
   CourseData,
@@ -30,23 +30,9 @@ const router = Router();
 
 // Middleware: STRICT ADMIN ONLY. Unauthenticated visitors or students are strictly blocked.
 const verifyAdminAccess = (req: Request, res: Response, next: Function) => {
-  if (!req.user) {
-    return res.status(401).json({
-      success: false,
-      code: 'UNAUTHORIZED',
-      message: 'Authentication required. Please sign in with an administrator account.',
-    });
-  }
-
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      code: 'FORBIDDEN_ADMIN_ONLY',
-      message: 'Access Denied: This is a restricted administrative studio. Students are not permitted.',
-    });
-  }
-
-  next();
+  authenticateAdmin(req, res, () => {
+    next();
+  });
 };
 
 // 0. GET /api/admin/verify (Strict check verifying active administrator session)

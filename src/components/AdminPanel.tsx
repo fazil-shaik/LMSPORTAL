@@ -24,7 +24,9 @@ import {
   MoveDown,
   X,
   Settings,
+  LogOut,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 // -------------------------------------------------------------
 // Type Definitions matching PDF Section 2, 3, 4, 5, 6, 8, 11
@@ -162,6 +164,8 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanelProps) {
+  const { adminUser, adminSignOut } = useAuth();
+
   // Top Level Navigation Tabs
   const [activeTab, setActiveTab] = useState<'studio' | 'analytics' | 'sales'>('studio');
 
@@ -211,7 +215,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchCourses = async () => {
     setLoadingCourses(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch('/api/admin/courses', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -243,7 +247,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const fetchAnalytics = async () => {
     setLoadingAnalytics(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch('/api/admin/analytics', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -261,7 +265,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   // Fetch Sales
   const fetchSales = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch('/api/admin/sales', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -290,7 +294,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
         const base64 = reader.result as string;
         setUploadProgress({ uploading: true, percent: 45, field });
 
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
         const res = await fetch('/api/admin/upload', {
           method: 'POST',
           headers: {
@@ -348,7 +352,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     setSavingChanges(true);
     setStatusMessage(null);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch(`/api/admin/courses/${selectedCourse.id}`, {
         method: 'PUT',
         headers: {
@@ -377,7 +381,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
     if (!selectedCourse) return;
     setSavingChanges(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch(`/api/admin/courses/${selectedCourse.id}/publish`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -405,7 +409,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
   const handleResetProgress = async (userId: string, courseId: string, type: 'lesson' | 'quiz' | 'course', targetId?: string) => {
     if (!confirm(`Are you sure you want to reset ${type} progress for this student?`)) return;
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
       const res = await fetch('/api/admin/reset-progress', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -484,6 +488,27 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
             <span>Orders & Sales</span>
           </button>
         </div>
+
+        {/* Admin Session Actions */}
+        <div className="flex items-center gap-2">
+          {adminUser && (
+            <div className="hidden md:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs text-slate-300">
+              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-mono text-[11px] text-slate-300 max-w-[150px] truncate">{adminUser.email}</span>
+            </div>
+          )}
+          <button
+            onClick={async () => {
+              await adminSignOut();
+              onBackToApp();
+            }}
+            className="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/80 text-rose-300 hover:text-white transition text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Sign out of Administrator Command Center"
+          >
+            <LogOut className="size-3.5" />
+            <span className="hidden sm:inline">Sign Out Admin</span>
+          </button>
+        </div>
       </header>
 
       {/* Notification Toast */}
@@ -542,7 +567,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                 onClick={async () => {
                   const title = prompt('Enter Course Title:', 'New Masterclass');
                   if (!title) return;
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                   const res = await fetch('/api/admin/courses', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1033,7 +1058,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                         onClick={async () => {
                           const title = prompt('Module title:');
                           if (!title) return;
-                          const token = localStorage.getItem('token');
+                          const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                           const res = await fetch(`/api/admin/courses/${selectedCourse.id}/modules`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1084,7 +1109,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                                   const temp = list[mIdx];
                                   list[mIdx] = list[mIdx - 1];
                                   list[mIdx - 1] = temp;
-                                  const token = localStorage.getItem('token');
+                                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                   await fetch(`/api/admin/courses/${selectedCourse.id}/modules/reorder`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1105,7 +1130,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                                   const temp = list[mIdx];
                                   list[mIdx] = list[mIdx + 1];
                                   list[mIdx + 1] = temp;
-                                  const token = localStorage.getItem('token');
+                                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                   await fetch(`/api/admin/courses/${selectedCourse.id}/modules/reorder`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1123,7 +1148,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                               <button
                                 onClick={async () => {
                                   if (!confirm(`Archive module "${mod.title}"?`)) return;
-                                  const token = localStorage.getItem('token');
+                                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                   await fetch(`/api/admin/modules/${mod.id}`, {
                                     method: 'DELETE',
                                     headers: { Authorization: `Bearer ${token}` },
@@ -1253,7 +1278,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                                   <button
                                     onClick={async () => {
                                       if (!confirm(`Archive lesson "${les.title}"?`)) return;
-                                      const token = localStorage.getItem('token');
+                                      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                       await fetch(`/api/admin/lessons/${les.id}`, {
                                         method: 'DELETE',
                                         headers: { Authorization: `Bearer ${token}` },
@@ -1447,7 +1472,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                               </h3>
                               <button
                                 onClick={async () => {
-                                  const token = localStorage.getItem('token');
+                                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                   const res = await fetch(`/api/admin/quizzes/${quiz.id}/questions`, {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1514,7 +1539,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                                     <button
                                       onClick={async () => {
                                         if (!confirm('Delete question?')) return;
-                                        const token = localStorage.getItem('token');
+                                        const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                                         await fetch(`/api/admin/quiz-questions/${q.id}`, {
                                           method: 'DELETE',
                                           headers: { Authorization: `Bearer ${token}` },
@@ -2157,7 +2182,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
               </button>
               <button
                 onClick={async () => {
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                   if (editingLesson.isNew) {
                     await fetch(`/api/admin/modules/${editingLesson.moduleId}/lessons`, {
                       method: 'POST',
@@ -2218,7 +2243,7 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
                 onClick={async () => {
                   const targetMod = selectedCourse?.modules?.find((m) => m.id === selectedQuizModuleId);
                   if (!targetMod?.quiz) return alert('No quiz found for selected module.');
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
                   const res = await fetch(`/api/admin/quizzes/${targetMod.quiz.id}/import-csv`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

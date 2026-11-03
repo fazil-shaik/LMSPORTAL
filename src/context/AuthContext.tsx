@@ -10,9 +10,27 @@ export interface User {
   createdAt?: string;
 }
 
-interface AuthContextType {
+export interface AuthContextType {
+  // 1. Student Session
   user: User | null;
   loading: boolean;
+  studentToken: string | null;
+  signIn: (email: string, password: string, rememberMe?: boolean, adminSecretKey?: string) => Promise<{ success: boolean; message?: string }>;
+  signUp: (name: string, email: string, password: string, terms: boolean) => Promise<{ success: boolean; message?: string }>;
+  googleSignIn: (profileData?: { email?: string; name?: string; avatarUrl?: string }) => Promise<{ success: boolean; message?: string }>;
+  signOut: () => Promise<void>;
+  checkAuth: () => Promise<void>;
+
+  // 2. Administrator Session (Completely Isolated & Secured)
+  adminUser: User | null;
+  adminLoading: boolean;
+  adminToken: string | null;
+  isAdminAuthenticated: boolean;
+  adminSignIn: (email: string, password: string, adminSecretKey?: string, rememberMe?: boolean) => Promise<{ success: boolean; message?: string }>;
+  adminSignOut: () => Promise<void>;
+  checkAdminAuth: () => Promise<boolean>;
+
+  // 3. Modals & UI Controls
   authModalOpen: boolean;
   authMode: 'signin' | 'signup' | 'forgot' | 'reset' | 'verify';
   settingsModalOpen: boolean;
@@ -25,11 +43,8 @@ interface AuthContextType {
   openSettingsModal: (tab?: 'profile' | 'security' | 'billing' | 'privacy') => void;
   closeSettingsModal: () => void;
   setSettingsActiveTab: (tab: 'profile' | 'security' | 'billing' | 'privacy') => void;
-  signIn: (email: string, password: string, rememberMe?: boolean, adminSecretKey?: string) => Promise<{ success: boolean; message?: string }>;
-  signUp: (name: string, email: string, password: string, terms: boolean) => Promise<{ success: boolean; message?: string }>;
-  googleSignIn: (profileData?: { email?: string; name?: string; avatarUrl?: string }) => Promise<{ success: boolean; message?: string }>;
-  signOut: () => Promise<void>;
-  checkAuth: () => Promise<void>;
+
+  // 4. Student Account & Progress Actions
   verifyEmail: (token: string, targetEmail?: string) => Promise<{ success: boolean; message?: string }>;
   resendVerification: (targetEmail?: string) => Promise<{ success: boolean; message?: string }>;
   forgotPassword: (email: string) => Promise<{ success: boolean; message?: string }>;
@@ -46,8 +61,21 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Student Session State
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [studentToken, setStudentToken] = useState<string | null>(() => {
+    return localStorage.getItem('student_token') || localStorage.getItem('token');
+  });
+
+  // Dedicated Admin Session State (Completely Separate Storage & Lifecycle)
+  const [adminUser, setAdminUser] = useState<User | null>(null);
+  const [adminLoading, setAdminLoading] = useState<boolean>(true);
+  const [adminToken, setAdminToken] = useState<string | null>(() => {
+    return localStorage.getItem('admin_token');
+  });
+
+  // Modals & UI State
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot' | 'reset' | 'verify'>('signin');
   const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
@@ -56,36 +84,84 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [resetTokenPrompt, setResetTokenPrompt] = useState<string | null>(null);
   const [enrolledCourses, setEnrolledCourses] = useState<string[]>([]);
 
-  // Check current session from backend on load
+  // 1. Check Student Session (Isolated from Admin)
   const checkAuth = async () => {
     try {
       setLoading(true);
+      const activeToken = localStorage.getItem('student_token') || localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (activeToken) {
+        headers['Authorization'] = `Bearer ${activeToken}`;
+        headers['X-Student-Token'] = activeToken;
+      }
+
       const res = await fetch('/api/auth/me', {
         credentials: 'include',
+        headers,
       });
+
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.user) {
           setUser(data.user);
-          fetchEnrollments();
+          setStudentToken(activeToken);
+          fetchEnrollments(activeToken);
         } else {
           setUser(null);
         }
       } else {
         setUser(null);
       }
-    } catch (err) {
+    } catch {
       setUser(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchEnrollments = async () => {
+  // 2. Check Admin Session (Isolated from Student)
+  const checkAdminAuth = async (): Promise<boolean> => {
     try {
-      const token = localStorage.getItem('token');
+      setAdminLoading(true);
+      const activeAdminToken = localStorage.getItem('admin_token');
       const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (activeAdminToken) {
+        headers['Authorization'] = `Bearer ${activeAdminToken}`;
+        headers['X-Admin-Token'] = activeAdminToken;
+      }
+
+      const res = await fetch('/api/auth/admin/me', {
+        credentials: 'include',
+        headers,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.adminUser) {
+          setAdminUser(data.adminUser);
+          setAdminToken(activeAdminToken);
+          return true;
+        }
+      }
+      setAdminUser(null);
+      return false;
+    } catch {
+      setAdminUser(null);
+      return false;
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  // 3. Fetch Enrolled Courses for Authenticated Student
+  const fetchEnrollments = async (authToken?: string | null) => {
+    try {
+      const tokenToUse = authToken || localStorage.getItem('student_token') || localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (tokenToUse) {
+        headers['Authorization'] = `Bearer ${tokenToUse}`;
+        headers['X-Student-Token'] = tokenToUse;
+      }
 
       const res = await fetch('/api/courses/my-enrollments', {
         credentials: 'include',
@@ -102,8 +178,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Initialize both sessions on load concurrently without interfering
   useEffect(() => {
     checkAuth();
+    checkAdminAuth();
 
     // Check URL parameters for password reset tokens
     const params = new URLSearchParams(window.location.search);
@@ -152,7 +230,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSettingsModalOpen(false);
   };
 
-  // FR-9: Sign In with email and password
+  // FR-9: Student Sign In with email and password
   const signIn = async (email: string, password: string, rememberMe = false, adminSecretKey?: string) => {
     try {
       const res = await fetch('/api/auth/signin', {
@@ -164,9 +242,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setUser(data.user);
+        const token = data.studentToken || data.token;
+        if (token) {
+          localStorage.setItem('student_token', token);
+          localStorage.setItem('token', token);
+          setStudentToken(token);
+        }
         closeAuthModal();
-        fetchEnrollments();
-        // Route to /dashboard on student login, but keep current location if already on /admin
+        fetchEnrollments(token);
+
+        // Route to /dashboard on student login if not already on an admin route
         if (!window.location.pathname.startsWith('/admin') && window.location.pathname !== '/dashboard') {
           window.history.pushState({}, '', '/dashboard');
           window.dispatchEvent(new PopStateEvent('popstate'));
@@ -175,12 +260,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Invalid credentials' };
       }
-    } catch (error: any) {
+    } catch {
       return { success: false, message: 'Could not connect to authentication server.' };
     }
   };
 
-  // FR-7: Sign Up with email and password
+  // FR-7: Student Sign Up with email and password
   const signUp = async (name: string, email: string, password: string, terms: boolean) => {
     try {
       const res = await fetch('/api/auth/signup', {
@@ -192,6 +277,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setUser(data.user);
+        const token = data.studentToken || data.token;
+        if (token) {
+          localStorage.setItem('student_token', token);
+          localStorage.setItem('token', token);
+          setStudentToken(token);
+        }
         setVerificationTokenPrompt(null);
         setAuthMode('verify');
         return {
@@ -201,12 +292,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Registration failed' };
       }
-    } catch (error: any) {
+    } catch {
       return { success: false, message: 'Could not connect to authentication server.' };
     }
   };
 
-  // FR-8: Social login with Google
+  // FR-8: Social login with Google for Student
   const googleSignIn = async (profileData?: { email?: string; name?: string; avatarUrl?: string }) => {
     try {
       const payload = {
@@ -226,10 +317,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setUser(data.user);
+        const token = data.studentToken || data.token;
+        if (token) {
+          localStorage.setItem('student_token', token);
+          localStorage.setItem('token', token);
+          setStudentToken(token);
+        }
         closeAuthModal();
-        fetchEnrollments();
-        // Route to /dashboard on successful login
-        if (window.location.pathname !== '/dashboard') {
+        fetchEnrollments(token);
+        if (!window.location.pathname.startsWith('/admin') && window.location.pathname !== '/dashboard') {
           window.history.pushState({}, '', '/dashboard');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }
@@ -237,8 +333,88 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Google sign in failed' };
       }
-    } catch (err) {
+    } catch {
       return { success: false, message: 'Failed to connect for Google sign-in.' };
+    }
+  };
+
+  // FR-9: Student Sign Out (Clears student session ONLY; admin session is unaffected)
+  const signOut = async () => {
+    try {
+      await fetch('/api/auth/signout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Ignore network errors on signout
+    } finally {
+      setUser(null);
+      setStudentToken(null);
+      localStorage.removeItem('student_token');
+      localStorage.removeItem('token');
+      setEnrolledCourses([]);
+      closeSettingsModal();
+      if (window.location.pathname === '/dashboard') {
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
+    }
+  };
+
+  // =========================================================================
+  // DEDICATED ADMINISTRATOR AUTHENTICATION (Air-tight isolation)
+  // =========================================================================
+
+  const adminSignIn = async (
+    email: string,
+    password: string,
+    adminSecretKey?: string,
+    rememberMe = false
+  ) => {
+    try {
+      const res = await fetch('/api/auth/admin/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password, adminSecretKey, rememberMe }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.adminUser) {
+        setAdminUser(data.adminUser);
+        const token = data.adminToken;
+        if (token) {
+          localStorage.setItem('admin_token', token);
+          setAdminToken(token);
+        }
+        return { success: true, message: data.message };
+      } else {
+        return {
+          success: false,
+          message: data.message || 'Administrative credentials verification failed.',
+        };
+      }
+    } catch {
+      return { success: false, message: 'Could not connect to administrator authentication service.' };
+    }
+  };
+
+  const adminSignOut = async () => {
+    try {
+      const activeAdminToken = localStorage.getItem('admin_token');
+      const headers: Record<string, string> = {};
+      if (activeAdminToken) headers['X-Admin-Token'] = activeAdminToken;
+
+      await fetch('/api/auth/admin/signout', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+      });
+    } catch {
+      // Ignore network errors on admin signout
+    } finally {
+      setAdminUser(null);
+      setAdminToken(null);
+      localStorage.removeItem('admin_token');
     }
   };
 
@@ -263,7 +439,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Verification code invalid or expired' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Verification request failed.' };
     }
   };
@@ -329,7 +505,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Reset failed.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Failed to reset password.' };
     }
   };
@@ -349,7 +525,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Password change failed.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Failed to change password.' };
     }
   };
@@ -370,7 +546,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Profile update failed.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Failed to update profile.' };
     }
   };
@@ -422,26 +598,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // FR-9: Sign Out
-  const signOut = async () => {
-    try {
-      await fetch('/api/auth/signout', {
-        method: 'POST',
-        credentials: 'include',
-      });
-    } catch {
-      // Ignore network errors on signout
-    } finally {
-      setUser(null);
-      setEnrolledCourses([]);
-      closeSettingsModal();
-      if (window.location.pathname === '/dashboard') {
-        window.history.pushState({}, '', '/');
-        window.dispatchEvent(new PopStateEvent('popstate'));
-      }
-    }
-  };
-
   // FR-7: Course enrollment (requires verified email)
   const enrollInCourse = async (courseId: string) => {
     if (!user) {
@@ -457,9 +613,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('student_token') || localStorage.getItem('token');
       const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['X-Student-Token'] = token;
+      }
 
       const res = await fetch(`/api/courses/${courseId}/enroll`, {
         method: 'POST',
@@ -481,16 +640,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           message: data.message || 'Enrollment failed',
         };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Network error during enrollment.' };
     }
   };
+
+  const isAdminAuthenticated = !!adminUser && adminUser.role === 'admin';
 
   return (
     <AuthContext.Provider
       value={{
         user,
         loading,
+        studentToken,
+        adminUser,
+        adminLoading,
+        adminToken,
+        isAdminAuthenticated,
+        adminSignIn,
+        adminSignOut,
+        checkAdminAuth,
         authModalOpen,
         authMode,
         settingsModalOpen,
@@ -517,7 +686,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         exportUserData,
         deleteAccount,
         enrolledCourses,
-        refreshEnrollments: fetchEnrollments,
+        refreshEnrollments: () => fetchEnrollments(),
         enrollInCourse,
       }}
     >
