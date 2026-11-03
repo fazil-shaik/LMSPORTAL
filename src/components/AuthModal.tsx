@@ -16,7 +16,6 @@ export default function AuthModal() {
     resendVerification,
     forgotPassword,
     resetPassword,
-    verificationTokenPrompt,
     resetTokenPrompt,
   } = useAuth();
 
@@ -37,13 +36,10 @@ export default function AuthModal() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (verificationTokenPrompt) {
-      setVerifyTokenInput(verificationTokenPrompt);
-    }
     if (resetTokenPrompt) {
       setResetTokenInput(resetTokenPrompt);
     }
-  }, [verificationTokenPrompt, resetTokenPrompt]);
+  }, [resetTokenPrompt]);
 
   if (!authModalOpen) return null;
 
@@ -71,18 +67,13 @@ export default function AuthModal() {
         if (!result.success) {
           setError(result.message || 'Registration failed');
         } else {
-          setSuccessMessage('Account created! Verification code ready.');
-          if (result.verificationToken) {
-            setVerifyTokenInput(result.verificationToken);
-          }
+          setSuccessMessage(result.message || 'Account created! Please check your email for the 6-digit verification code.');
+          setVerifyTokenInput('');
         }
       } else if (authMode === 'forgot') {
         const result = await forgotPassword(email);
         if (result.success) {
           setSuccessMessage(result.message || 'Password reset link sent to your email.');
-          if (result.resetToken) {
-            setResetTokenInput(result.resetToken);
-          }
         } else {
           setError(result.message || 'Failed to send reset link.');
         }
@@ -145,9 +136,7 @@ export default function AuthModal() {
     setLoading(false);
     if (result.success) {
       setSuccessMessage(result.message || 'Verification email resent! Check your inbox for the 6-digit code.');
-      if (result.verificationToken) {
-        setVerifyTokenInput(result.verificationToken);
-      }
+      setVerifyTokenInput('');
     } else {
       setError(result.message || 'Could not resend email.');
     }
@@ -302,8 +291,9 @@ export default function AuthModal() {
                   required
                   maxLength={6}
                   value={verifyTokenInput}
-                  onChange={(e) => setVerifyTokenInput(e.target.value.replace(/[^0-9a-zA-Z_-]/g, ''))}
+                  onChange={(e) => setVerifyTokenInput(e.target.value.replace(/[^0-9]/g, ''))}
                   placeholder="1 2 3 4 5 6"
+                  autoComplete="one-time-code"
                   className="h-[52px] px-3.5 text-center font-mono font-bold text-2xl tracking-[8px] border border-[#e2e8f0] dark:border-slate-700 rounded-[8px] text-[#0f172a] dark:text-white bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-[#4f46e5]"
                 />
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">

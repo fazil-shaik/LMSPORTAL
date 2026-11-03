@@ -16,6 +16,7 @@ import { rateLimiter } from '../middleware/rateLimiter.js';
 import {
   generateOtp,
   sendVerificationOtpEmail,
+  sendPasswordResetEmail,
   isEmailConfigured,
 } from '../services/email.js';
 
@@ -243,25 +244,14 @@ router.post('/signup', rateLimiter(15 * 60 * 1000, 10), async (req: Request, res
     const token = generateToken(newUser, false);
     setAuthCookie(res, token, false);
 
-    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${verificationOtp}`;
-
-    let message = emailResult.success && emailResult.mode === 'smtp'
-      ? `Account created! A 6-digit verification OTP has been sent to your inbox (${lowerEmail}).`
-      : `Account created! Please verify with the 6-digit code sent to ${lowerEmail}.`;
-
-    if (!emailResult.success && emailResult.mode === 'smtp') {
-      const shortError = emailResult.error?.split('\n')[0] || 'SMTP Authentication Error';
-      message = `Account created! Note: SMTP delivery failed (${shortError}). Code: ${verificationOtp}`;
-    }
+    const message = emailResult.success
+      ? `Account created! A 6-digit verification code has been sent to your email (${lowerEmail}).`
+      : `Account created! Please check your email for the verification code.`;
 
     return res.status(201).json({
       success: true,
       message,
       user: newUser,
-      verificationToken: verificationOtp,
-      verificationLink,
-      smtpConfigured: isEmailConfigured(),
-      emailDelivery: emailResult,
     });
   } catch (error: any) {
     console.error('Sign up error:', error);
@@ -650,25 +640,17 @@ router.post('/resend-verification', async (req: Request, res: Response) => {
 
     // Dispatch real email with 6-digit OTP
     const emailResult = await sendVerificationOtpEmail(userEmail, userName, freshOtp);
-    const verificationLink = `${req.protocol}://${req.get('host')}/?verifyToken=${freshOtp}`;
 
-    let message =
-      emailResult.success && emailResult.mode === 'smtp'
-        ? `A 6-digit verification OTP has been sent to your inbox (${userEmail}).`
-        : `A fresh 6-digit verification code has been sent to ${userEmail}.`;
-
-    if (!emailResult.success && emailResult.mode === 'smtp') {
-      const shortError = emailResult.error?.split('\n')[0] || 'SMTP Authentication Error';
-      message = `Generated fresh OTP (${freshOtp}), but SMTP delivery failed (${shortError}).`;
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Could not send verification email at this time. Please try again in a few moments.',
+      });
     }
 
     return res.status(200).json({
       success: true,
-      message,
-      verificationToken: freshOtp,
-      verificationLink,
-      smtpConfigured: isEmailConfigured(),
-      emailDelivery: emailResult,
+      message: `A fresh 6-digit verification code has been sent to your email (${userEmail}).`,
     });
   } catch (error) {
     console.error('Resend verification error:', error);
@@ -764,12 +746,12 @@ router.post('/forgot-password', rateLimiter(15 * 60 * 1000, 10), async (req: Req
     }
 
     const resetLink = `${req.protocol}://${req.get('host')}/?resetToken=${resetToken}`;
+    const user = await safeFindUserByEmail(email.toLowerCase().trim());
+    await sendPasswordResetEmail(email.toLowerCase().trim(), user?.name || '', resetLink);
 
     return res.status(200).json({
       success: true,
       message: 'If an account exists with this email, a password reset link has been sent.',
-      resetToken,
-      resetLink,
     });
   } catch (error) {
     console.error('Forgot password error:', error);

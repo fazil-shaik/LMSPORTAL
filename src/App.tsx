@@ -103,8 +103,8 @@ export default function App() {
       if (data.success && data.courses) {
         setLandingCourses(data.courses);
       }
-    } catch (err) {
-      console.error('Error fetching public courses:', err);
+    } catch {
+      // Quietly handle network status
     } finally {
       setLoadingLandingCourses(false);
     }

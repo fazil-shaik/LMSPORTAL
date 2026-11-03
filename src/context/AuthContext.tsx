@@ -26,13 +26,13 @@ interface AuthContextType {
   closeSettingsModal: () => void;
   setSettingsActiveTab: (tab: 'profile' | 'security' | 'billing' | 'privacy') => void;
   signIn: (email: string, password: string, rememberMe?: boolean, adminSecretKey?: string) => Promise<{ success: boolean; message?: string }>;
-  signUp: (name: string, email: string, password: string, terms: boolean) => Promise<{ success: boolean; message?: string; verificationToken?: string }>;
+  signUp: (name: string, email: string, password: string, terms: boolean) => Promise<{ success: boolean; message?: string }>;
   googleSignIn: (profileData?: { email?: string; name?: string; avatarUrl?: string }) => Promise<{ success: boolean; message?: string }>;
   signOut: () => Promise<void>;
   checkAuth: () => Promise<void>;
   verifyEmail: (token: string, targetEmail?: string) => Promise<{ success: boolean; message?: string }>;
-  resendVerification: (targetEmail?: string) => Promise<{ success: boolean; message?: string; verificationToken?: string; smtpConfigured?: boolean }>;
-  forgotPassword: (email: string) => Promise<{ success: boolean; message?: string; resetToken?: string }>;
+  resendVerification: (targetEmail?: string) => Promise<{ success: boolean; message?: string }>;
+  forgotPassword: (email: string) => Promise<{ success: boolean; message?: string }>;
   resetPassword: (token: string, newPassword: string) => Promise<{ success: boolean; message?: string }>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; message?: string }>;
   updateProfile: (name: string, avatarUrl?: string | null) => Promise<{ success: boolean; message?: string; profile?: any }>;
@@ -91,23 +91,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setEnrolledCourses(data.enrolledCourseIds);
         }
       }
-    } catch (e) {
-      console.warn('Failed to fetch enrollments:', e);
+    } catch {
+      // Quietly handle offline or unauthenticated enrollment check
     }
   };
 
   useEffect(() => {
     checkAuth();
 
-    // Check URL parameters for email verification or password reset tokens
+    // Check URL parameters for password reset tokens
     const params = new URLSearchParams(window.location.search);
-    const verifyToken = params.get('verifyToken');
     const resetToken = params.get('resetToken');
 
-    if (verifyToken) {
-      setVerificationTokenPrompt(verifyToken);
-      openAuthModal('verify', verifyToken);
-    } else if (resetToken) {
+    if (resetToken) {
       setResetTokenPrompt(resetToken);
       openAuthModal('reset', resetToken);
     }
@@ -178,14 +174,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setUser(data.user);
-        if (data.verificationToken) {
-          setVerificationTokenPrompt(data.verificationToken);
-        }
+        setVerificationTokenPrompt(null);
         setAuthMode('verify');
         return {
           success: true,
           message: data.message,
-          verificationToken: data.verificationToken,
         };
       } else {
         return { success: false, message: data.message || 'Registration failed' };
@@ -269,19 +262,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (data.verificationToken) {
-          setVerificationTokenPrompt(data.verificationToken);
-        }
+        setVerificationTokenPrompt(null);
         return {
           success: true,
           message: data.message,
-          verificationToken: data.verificationToken,
-          smtpConfigured: data.smtpConfigured,
         };
       } else {
         return { success: false, message: data.message || 'Could not resend email.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Request failed.' };
     }
   };
@@ -297,14 +286,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (data.resetToken) {
-          setResetTokenPrompt(data.resetToken);
-        }
-        return { success: true, message: data.message, resetToken: data.resetToken };
+        setResetTokenPrompt(null);
+        return { success: true, message: data.message };
       } else {
         return { success: false, message: data.message || 'Failed to send reset link.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Request failed.' };
     }
   };
@@ -389,8 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         alert('Could not export user data.');
       }
-    } catch (e) {
-      console.error('Export error:', e);
+    } catch {
       alert('Network error while exporting user data.');
     }
   };
@@ -413,7 +399,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         return { success: false, message: data.message || 'Could not delete account.' };
       }
-    } catch (e) {
+    } catch {
       return { success: false, message: 'Failed to delete account.' };
     }
   };
@@ -425,8 +411,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         credentials: 'include',
       });
-    } catch (e) {
-      console.warn('Sign out request failed:', e);
+    } catch {
+      // Ignore network errors on signout
     } finally {
       setUser(null);
       setEnrolledCourses([]);
