@@ -1,6 +1,18 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { authenticate } from '../middleware/auth.js';
-import { initialCourses, CourseData, mockEnrollments, mockPurchases, MockPurchase, getUserCourseProgress, persistCourses } from './courses.js';
+import {
+  initialCourses,
+  CourseData,
+  mockEnrollments,
+  mockPurchases,
+  MockPurchase,
+  getUserCourseProgress,
+  persistCourses,
+  syncCourseToDb,
+  enrollUserInCourse,
+  isValidUUID,
+} from './courses.js';
 import { mockUsers } from './auth.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
@@ -202,7 +214,8 @@ router.post('/courses', authenticate, verifyAdminAccess, async (req: Request, re
     }
 
     const newSlug = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-    const newId = 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 6);
+    const newId = crypto.randomUUID();
+    const newLessonId = crypto.randomUUID();
 
     const newCourse: CourseData = {
       id: newId,
@@ -232,7 +245,7 @@ router.post('/courses', authenticate, verifyAdminAccess, async (req: Request, re
       accentColor: '#4f46e5',
       lessons: [
         {
-          id: 'l-' + Date.now().toString(36),
+          id: newLessonId,
           title: 'Welcome & Orientation',
           lessonNumber: 1,
           duration: '15 min',
@@ -244,6 +257,7 @@ router.post('/courses', authenticate, verifyAdminAccess, async (req: Request, re
 
     initialCourses.unshift(newCourse);
     persistCourses();
+    await syncCourseToDb(newCourse);
 
     return res.status(201).json({
       success: true,
@@ -275,6 +289,7 @@ router.put('/courses/:id', authenticate, verifyAdminAccess, async (req: Request,
 
     initialCourses[courseIdx] = updated;
     persistCourses();
+    await syncCourseToDb(updated);
 
     return res.status(200).json({
       success: true,
@@ -298,6 +313,14 @@ router.delete('/courses/:id', authenticate, verifyAdminAccess, async (req: Reque
 
     initialCourses.splice(courseIdx, 1);
     persistCourses();
+
+    if (isDatabaseConnected && db && isValidUUID(courseId)) {
+      try {
+        await db.delete(schema.courses).where(eq(schema.courses.id, courseId));
+      } catch (err: any) {
+        console.warn('Delete course from Neon DB warning:', err?.message || err);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -425,11 +448,16 @@ router.get('/students', authenticate, verifyAdminAccess, async (req: Request, re
 
     if (studentUsers.length === 0) {
       studentUsers = mockUsers.filter((u) => u.role === 'student');
-      allEnrollments = mockEnrollments;
     }
 
+    // Merge DB enrollments with in-memory mock enrollments for complete consistency
+    const mergedEnrollments = [
+      ...allEnrollments,
+      ...mockEnrollments.filter((m) => !allEnrollments.some((d: any) => d.userId === m.userId && d.courseId === m.courseId)),
+    ];
+
     let studentList = studentUsers.map((u: any) => {
-      const userEnrolls = allEnrollments.filter((e: any) => e.userId === u.id && e.status === 'active');
+      const userEnrolls = mergedEnrollments.filter((e: any) => e.userId === u.id && e.status === 'active');
       const activeCount = userEnrolls.length;
       const enrolledCourses = initialCourses.filter((c) => userEnrolls.some((e: any) => e.courseId === c.id));
 
@@ -485,34 +513,15 @@ router.post('/students/:userId/grant-access', authenticate, verifyAdminAccess, a
       return res.status(400).json({ success: false, message: 'courseId is required.' });
     }
 
-    // Add to mockEnrollments
-    const existing = mockEnrollments.find((e) => e.userId === userId && e.courseId === courseId);
-    if (!existing) {
-      mockEnrollments.push({
-        id: 'manual-enr-' + Date.now().toString(36),
-        userId,
-        courseId,
-        status: 'active',
-        enrolledDate: new Date(),
-      });
-    } else {
-      existing.status = 'active';
-    }
-
-    mockNotifications.unshift({
-      id: 'notif-' + Date.now().toString(36),
-      type: 'welcome',
-      recipient: userId,
-      subject: `Admin manually granted full course access to course ${courseId}`,
-      status: 'delivered',
-      timestamp: new Date().toISOString(),
-    });
+    // Grant access across both Neon DB and in-memory mock store
+    await enrollUserInCourse(userId, courseId);
 
     return res.status(200).json({
       success: true,
-      message: 'Access successfully granted to student without payment.',
+      message: 'Access successfully granted to student.',
     });
   } catch (error: any) {
+    console.error('Grant access error:', error);
     return res.status(500).json({ success: false, message: 'Failed to grant access.' });
   }
 });
@@ -523,6 +532,19 @@ router.post('/students/:userId/revoke-access', authenticate, verifyAdminAccess, 
     const { userId } = req.params;
     const { courseId } = req.body;
 
+    // Revoke from Neon Postgres
+    if (isDatabaseConnected && db && isValidUUID(userId) && isValidUUID(courseId)) {
+      try {
+        await db
+          .update(schema.enrollments)
+          .set({ status: 'revoked' })
+          .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.courseId, courseId)));
+      } catch (dbErr: any) {
+        console.warn('Neon DB revoke access warning:', dbErr?.message || dbErr);
+      }
+    }
+
+    // Revoke from in-memory fallback
     const existingIdx = mockEnrollments.findIndex((e) => e.userId === userId && e.courseId === courseId);
     if (existingIdx !== -1) {
       mockEnrollments[existingIdx].status = 'revoked';
@@ -533,6 +555,7 @@ router.post('/students/:userId/revoke-access', authenticate, verifyAdminAccess, 
       message: 'Access successfully revoked.',
     });
   } catch (error: any) {
+    console.error('Revoke access error:', error);
     return res.status(500).json({ success: false, message: 'Failed to revoke access.' });
   }
 });

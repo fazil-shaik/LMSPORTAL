@@ -483,6 +483,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
         setStudentActionSuccess(`Access successfully granted to ${grantModalStudent.name}!`);
         setGrantModalStudent(null);
         fetchStudents();
+        window.dispatchEvent(new CustomEvent('lms:enrollments-changed'));
+        if (onCourseModified) onCourseModified();
         setTimeout(() => setStudentActionSuccess(null), 3500);
       }
     } catch (err) {
@@ -502,6 +504,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
       if (data.success) {
         setStudentActionSuccess('Access successfully revoked.');
         fetchStudents();
+        window.dispatchEvent(new CustomEvent('lms:enrollments-changed'));
+        if (onCourseModified) onCourseModified();
         setTimeout(() => setStudentActionSuccess(null), 3500);
       }
     } catch (err) {
@@ -519,6 +523,8 @@ export default function AdminPanel({ onBackToApp, onCourseModified }: AdminPanel
       const data = await res.json();
       if (data.success) {
         fetchSales();
+        window.dispatchEvent(new CustomEvent('lms:enrollments-changed'));
+        if (onCourseModified) onCourseModified();
       }
     } catch (err) {
       console.error('Refund processing error:', err);

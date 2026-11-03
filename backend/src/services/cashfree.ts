@@ -32,9 +32,12 @@ export interface CashfreeOrderResult {
 const getCashfreeConfig = () => {
   const appId = (process.env.CASHFREE_APP_ID || '').trim();
   const secretKey = (process.env.CASHFREE_SECRET_KEY || '').trim();
-  const env = (process.env.CASHFREE_ENV || 'TEST').toUpperCase();
-  const apiVersion = process.env.CASHFREE_API_VERSION || '2023-08-01';
-  const baseUrl = env === 'PROD' ? 'https://api.cashfree.com/pg' : 'https://sandbox.cashfree.com/pg';
+  const env = (process.env.CASHFREE_ENV || 'SANDBOX').trim().toUpperCase();
+  const apiVersion = (process.env.CASHFREE_API_VERSION || '').trim() || '2023-08-01';
+  const defaultCurrency = (process.env.CASHFREE_CURRENCY || 'INR').trim().toUpperCase();
+  const baseUrl = env === 'PROD' || env === 'PRODUCTION'
+    ? 'https://api.cashfree.com/pg'
+    : 'https://sandbox.cashfree.com/pg';
 
   return {
     appId,
@@ -42,6 +45,7 @@ const getCashfreeConfig = () => {
     env,
     apiVersion,
     baseUrl,
+    defaultCurrency,
     isLive: Boolean(appId && secretKey),
   };
 };
@@ -65,7 +69,7 @@ export const mockCashfreeOrders = new Map<string, {
  */
 export async function createCashfreeOrder(params: CreateCashfreeOrderParams): Promise<CashfreeOrderResult> {
   const config = getCashfreeConfig();
-  const currency = params.orderCurrency || 'USD';
+  let currency = params.orderCurrency || config.defaultCurrency || 'INR';
   const phone = params.customerPhone || '9876543210';
   const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
   const returnUrl = params.returnUrl || `${clientUrl}/checkout/success?order_id={order_id}`;
@@ -101,7 +105,7 @@ export async function createCashfreeOrder(params: CreateCashfreeOrderParams): Pr
   }
 
   try {
-    const payload = {
+    const payload: any = {
       order_id: params.orderId,
       order_amount: params.orderAmount,
       order_currency: currency,
@@ -122,7 +126,7 @@ export async function createCashfreeOrder(params: CreateCashfreeOrderParams): Pr
       },
     };
 
-    const res = await fetch(`${config.baseUrl}/orders`, {
+    let res = await fetch(`${config.baseUrl}/orders`, {
       method: 'POST',
       headers: {
         'x-client-id': config.appId,
@@ -133,7 +137,26 @@ export async function createCashfreeOrder(params: CreateCashfreeOrderParams): Pr
       body: JSON.stringify(payload),
     });
 
-    const data: any = await res.json();
+    let data: any = await res.json();
+
+    // Auto-retry with INR if the merchant account only supports INR (standard for Indian accounts)
+    if (!res.ok && data?.message && data.message.toLowerCase().includes('currency not enabled')) {
+      console.log('[Cashfree] Merchant account does not support', currency, '- auto-retrying with order_currency: INR...');
+      currency = 'INR';
+      payload.order_currency = 'INR';
+
+      res = await fetch(`${config.baseUrl}/orders`, {
+        method: 'POST',
+        headers: {
+          'x-client-id': config.appId,
+          'x-client-secret': config.secretKey,
+          'x-api-version': config.apiVersion,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      data = await res.json();
+    }
 
     if (res.ok && data.payment_session_id) {
       mockCashfreeOrders.set(params.orderId, {

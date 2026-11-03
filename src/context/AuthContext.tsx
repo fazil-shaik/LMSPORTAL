@@ -39,6 +39,7 @@ interface AuthContextType {
   exportUserData: () => Promise<void>;
   deleteAccount: (password: string) => Promise<{ success: boolean; message?: string }>;
   enrolledCourses: string[];
+  refreshEnrollments: () => Promise<void>;
   enrollInCourse: (courseId: string) => Promise<{ success: boolean; message?: string; code?: string }>;
 }
 
@@ -82,8 +83,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchEnrollments = async () => {
     try {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch('/api/courses/my-enrollments', {
         credentials: 'include',
+        headers,
       });
       if (res.ok) {
         const data = await res.json();
@@ -107,6 +113,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setResetTokenPrompt(resetToken);
       openAuthModal('reset', resetToken);
     }
+
+    const handleEnrollmentsChanged = () => {
+      fetchEnrollments();
+    };
+
+    window.addEventListener('lms:enrollments-changed', handleEnrollmentsChanged);
+    window.addEventListener('focus', handleEnrollmentsChanged);
+
+    return () => {
+      window.removeEventListener('lms:enrollments-changed', handleEnrollmentsChanged);
+      window.removeEventListener('focus', handleEnrollmentsChanged);
+    };
   }, []);
 
   const openAuthModal = (
@@ -439,13 +457,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
     try {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`/api/courses/${courseId}/enroll`, {
         method: 'POST',
         credentials: 'include',
+        headers,
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setEnrolledCourses((prev) => [...prev, courseId]);
+        setEnrolledCourses((prev) => Array.from(new Set([...prev, courseId])));
+        window.dispatchEvent(new CustomEvent('lms:enrollments-changed'));
         return { success: true, message: data.message };
       } else {
         if (data.code === 'EMAIL_NOT_VERIFIED') {
@@ -493,6 +517,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         exportUserData,
         deleteAccount,
         enrolledCourses,
+        refreshEnrollments: fetchEnrollments,
         enrollInCourse,
       }}
     >

@@ -2,8 +2,9 @@ import { Router, Request, Response } from 'express';
 import { eq, and } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { db, schema, isDatabaseConnected } from '../db/index.js';
+import { db, schema, isDatabaseConnected, rawSql, schemaSyncPromise, ensureDatabaseSchema } from '../db/index.js';
 import { authenticate } from '../middleware/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +13,11 @@ const DATA_DIR = path.resolve(__dirname, '../data');
 const COURSES_FILE = path.join(DATA_DIR, 'courses.json');
 
 const router = Router();
+
+export const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isValidUUID(id: any): boolean {
+  return typeof id === 'string' && UUID_REGEX.test(id.trim());
+}
 
 export interface CourseData {
   id: string;
@@ -233,6 +239,21 @@ export function loadCoursesFromFile(): CourseData[] {
       const data = fs.readFileSync(COURSES_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed) && parsed.length > 0) {
+        let modified = false;
+        for (const c of parsed) {
+          if (!isValidUUID(c.id)) {
+            console.log(`[Migration] Migrating course "${c.title}" invalid non-UUID ID "${c.id}" to RFC-4122 UUID...`);
+            c.id = crypto.randomUUID();
+            modified = true;
+          }
+        }
+        if (modified) {
+          try {
+            fs.writeFileSync(COURSES_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+          } catch (writeErr) {
+            console.warn('Failed to rewrite migrated courses:', writeErr);
+          }
+        }
         return parsed;
       }
     }
@@ -260,6 +281,106 @@ if (!fs.existsSync(COURSES_FILE)) {
   persistCourses();
 }
 
+/**
+ * Synchronizes a Course object into Neon PostgreSQL schema.courses table
+ */
+export async function syncCourseToDb(course: CourseData) {
+  if (!isDatabaseConnected || !db || !isValidUUID(course.id)) return;
+  try {
+    if (schemaSyncPromise) {
+      await schemaSyncPromise;
+    }
+
+    const existing = await db
+      .select({ id: schema.courses.id })
+      .from(schema.courses)
+      .where(eq(schema.courses.id, course.id));
+
+    const courseValues = {
+      id: course.id,
+      slug: course.slug,
+      title: course.title,
+      description: course.description || '',
+      thumbnail: course.thumbnail || '',
+      priceCents: course.priceCents || 20000,
+      currency: course.currency || 'USD',
+      level: course.level || 'All Levels',
+      status: (course.status as any) || 'published',
+      series: course.series || 'THE CAREER SERIES',
+      tagline: course.tagline || '',
+      instructor: course.instructor || 'Lead Instructor',
+      instructorTitle: course.instructorTitle || 'Industry Practitioner',
+      instructorBio: course.instructorBio || '',
+      instructorAvatar: course.instructorAvatar || '',
+      language: course.language || 'English',
+      lastUpdatedDate: course.lastUpdatedDate || 'November 2026',
+      badge: course.badge || '',
+      rating: course.rating ? course.rating.toString() : '4.9',
+      reviewCount: course.reviewCount || 128,
+      outcomes: course.outcomes || [],
+      requirements: course.requirements || [],
+      whoIsItFor: course.whoIsItFor || [],
+      totalDuration: course.totalDuration || '6 hours',
+      gradientFrom: course.gradientFrom || '#312e81',
+      gradientTo: course.gradientTo || '#6d28d9',
+      updatedAt: new Date(),
+    };
+
+    if (existing.length > 0) {
+      await db.update(schema.courses).set(courseValues).where(eq(schema.courses.id, course.id));
+    } else {
+      await db.insert(schema.courses).values({
+        ...courseValues,
+        createdAt: new Date(),
+      });
+    }
+  } catch (err: any) {
+    if (rawSql && err?.message && err.message.includes('does not exist')) {
+      console.log('[Neon PostgreSQL] Applying missing columns migration and retrying sync...');
+      await ensureDatabaseSchema(rawSql);
+      try {
+        await db.insert(schema.courses).values({
+          id: course.id,
+          slug: course.slug,
+          title: course.title,
+          description: course.description || '',
+          priceCents: course.priceCents || 20000,
+          currency: course.currency || 'USD',
+          level: course.level || 'All Levels',
+          status: (course.status as any) || 'published',
+          series: course.series || 'THE CAREER SERIES',
+          instructor: course.instructor || 'Lead Instructor',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }).onConflictDoNothing();
+        return;
+      } catch (retryErr: any) {
+        console.warn('Retry sync course warning:', retryErr?.message || retryErr);
+      }
+    }
+    console.warn('Sync course to Neon DB warning:', err?.message || err);
+  }
+}
+
+// Background sync of all seed/file courses into Neon DB
+if (isDatabaseConnected && db) {
+  (async () => {
+    try {
+      if (schemaSyncPromise) {
+        await schemaSyncPromise;
+      }
+      for (const c of initialCourses) {
+        if (isValidUUID(c.id)) {
+          await syncCourseToDb(c);
+        }
+      }
+      console.log('[Neon PostgreSQL] Synchronized courses into Neon PostgreSQL successfully');
+    } catch (e: any) {
+      console.warn('Startup course sync warning:', e?.message || e);
+    }
+  })();
+}
+
 // Fallback in-memory enrollments and purchases storage
 export const mockEnrollments: Array<{
   id: string;
@@ -268,6 +389,61 @@ export const mockEnrollments: Array<{
   status: 'active' | 'revoked';
   enrolledDate: Date;
 }> = [];
+
+/**
+ * Universal idempotent enrollment helper that writes to BOTH Neon DB and mock store
+ */
+export async function enrollUserInCourse(userId: string, courseId: string, purchaseId?: string) {
+  // 1. Update in-memory fallback
+  const existingMock = mockEnrollments.find((e) => e.userId === userId && e.courseId === courseId);
+  if (!existingMock) {
+    mockEnrollments.push({
+      id: 'enr_' + Date.now().toString(36),
+      userId,
+      courseId,
+      status: 'active',
+      enrolledDate: new Date(),
+    });
+  } else {
+    existingMock.status = 'active';
+  }
+
+  // 2. Insert into Neon Postgres database if connected
+  if (isDatabaseConnected && db && isValidUUID(userId) && isValidUUID(courseId)) {
+    try {
+      if (schemaSyncPromise) {
+        await schemaSyncPromise;
+      }
+
+      // Ensure course is present in schema.courses first
+      const course = initialCourses.find((c) => c.id === courseId);
+      if (course) {
+        await syncCourseToDb(course);
+      }
+
+      const existing = await db
+        .select()
+        .from(schema.enrollments)
+        .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.courseId, courseId)));
+
+      if (existing.length > 0) {
+        if (existing[0].status !== 'active') {
+          await db.update(schema.enrollments).set({ status: 'active' }).where(eq(schema.enrollments.id, existing[0].id));
+        }
+      } else {
+        await db.insert(schema.enrollments).values({
+          id: crypto.randomUUID(),
+          userId,
+          courseId,
+          status: 'active',
+          purchaseId: purchaseId && isValidUUID(purchaseId) ? purchaseId : null,
+        });
+      }
+    } catch (dbErr: any) {
+      console.warn('Neon DB enrollment save warning:', dbErr?.message || dbErr);
+    }
+  }
+}
 
 export interface MockPurchase {
   id: string;
@@ -523,7 +699,7 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
 
     // 1. Determine enrolled course IDs for this user
     let enrolledCourseIds: string[] = [];
-    if (isDatabaseConnected && db) {
+    if (isDatabaseConnected && db && isValidUUID(userId)) {
       try {
         const records = await db
           .select()
@@ -532,18 +708,18 @@ router.get('/dashboard', authenticate, async (req: Request, res: Response) => {
         enrolledCourseIds = records.map((r: any) => r.courseId);
       } catch (dbErr: any) {
         console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
-        enrolledCourseIds = mockEnrollments
-          .filter((e) => e.userId === userId && e.status === 'active')
-          .map((e) => e.courseId);
       }
-    } else {
-      enrolledCourseIds = mockEnrollments
-        .filter((e) => e.userId === userId && e.status === 'active')
-        .map((e) => e.courseId);
     }
 
+    // Always merge in any active enrollments from mock store as well
+    const mockIds = mockEnrollments
+      .filter((e) => e.userId === userId && e.status === 'active')
+      .map((e) => e.courseId);
+
+    const mergedEnrolledIds = Array.from(new Set([...enrolledCourseIds, ...mockIds]));
+
     // 2. Map ONLY enrolled courses for the student dashboard (no un-enrolled / locked courses)
-    const availableCourses = initialCourses.filter((c) => enrolledCourseIds.includes(c.id));
+    const availableCourses = initialCourses.filter((c) => mergedEnrolledIds.includes(c.id));
 
     let processedCourses = availableCourses.map((c) => {
       const isEnrolled = true;
@@ -718,7 +894,7 @@ router.get('/my-enrollments', authenticate, async (req: Request, res: Response) 
     const userId = req.user!.id;
     let enrolledCourseIds: string[] = [];
 
-    if (isDatabaseConnected && db) {
+    if (isDatabaseConnected && db && isValidUUID(userId)) {
       try {
         const records = await db
           .select()
@@ -727,19 +903,18 @@ router.get('/my-enrollments', authenticate, async (req: Request, res: Response) 
         enrolledCourseIds = records.map((r: any) => r.courseId);
       } catch (dbErr: any) {
         console.warn('Neon enrollments query error, using fallback:', dbErr?.message || dbErr);
-        enrolledCourseIds = mockEnrollments
-          .filter((e) => e.userId === userId && e.status === 'active')
-          .map((e) => e.courseId);
       }
-    } else {
-      enrolledCourseIds = mockEnrollments
-        .filter((e) => e.userId === userId && e.status === 'active')
-        .map((e) => e.courseId);
     }
+
+    const mockIds = mockEnrollments
+      .filter((e) => e.userId === userId && e.status === 'active')
+      .map((e) => e.courseId);
+
+    const mergedEnrolledIds = Array.from(new Set([...enrolledCourseIds, ...mockIds]));
 
     return res.status(200).json({
       success: true,
-      enrolledCourseIds,
+      enrolledCourseIds: mergedEnrolledIds,
     });
   } catch (error) {
     console.error('Fetch enrollments error:', error);
@@ -755,7 +930,7 @@ router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => 
 
     // Check user's email verification status (FR-7)
     let emailVerified = req.user!.emailVerified;
-    if (isDatabaseConnected && db) {
+    if (isDatabaseConnected && db && isValidUUID(userId)) {
       const u = await db.select({ emailVerified: schema.users.emailVerified }).from(schema.users).where(eq(schema.users.id, userId));
       if (u && u[0]) emailVerified = u[0].emailVerified;
     }
@@ -768,33 +943,7 @@ router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => 
       });
     }
 
-    if (isDatabaseConnected && db) {
-      const existing = await db
-        .select()
-        .from(schema.enrollments)
-        .where(and(eq(schema.enrollments.userId, userId), eq(schema.enrollments.courseId, courseId)));
-
-      if (existing.length > 0) {
-        return res.status(200).json({ success: true, message: 'Already enrolled in this course.' });
-      }
-
-      await db.insert(schema.enrollments).values({
-        userId,
-        courseId,
-        status: 'active',
-      });
-    } else {
-      const existing = mockEnrollments.find((e) => e.userId === userId && e.courseId === courseId);
-      if (!existing) {
-        mockEnrollments.push({
-          id: 'enr-' + Date.now().toString(36),
-          userId,
-          courseId,
-          status: 'active',
-          enrolledDate: new Date(),
-        });
-      }
-    }
+    await enrollUserInCourse(userId, courseId);
 
     // Initialize course progress
     const course = initialCourses.find((c) => c.id === courseId);
@@ -813,7 +962,7 @@ router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => 
           courseTitle: course.title,
           amountCents: course.priceCents,
           currency: course.currency || 'USD',
-          provider: 'stripe',
+          provider: 'cashfree',
           status: 'paid',
           createdAt: new Date().toISOString(),
         });
@@ -822,12 +971,12 @@ router.post('/:id/enroll', authenticate, async (req: Request, res: Response) => 
 
     return res.status(200).json({
       success: true,
-      message: 'Course unlocked! You now have full access to all lessons and internship resources.',
+      message: 'Successfully enrolled in course!',
       courseId,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Enroll error:', error);
-    return res.status(500).json({ success: false, message: 'Enrollment failed.' });
+    return res.status(500).json({ success: false, message: 'Failed to complete enrollment.' });
   }
 });
 

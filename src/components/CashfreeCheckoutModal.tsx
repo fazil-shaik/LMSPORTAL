@@ -51,6 +51,7 @@ export default function CashfreeCheckoutModal({
     orderId: string;
     paymentSessionId: string;
     orderAmount: number;
+    currency?: string;
     environment: string;
   } | null>(null);
 
@@ -125,6 +126,7 @@ export default function CashfreeCheckoutModal({
           orderId: data.orderId,
           paymentSessionId: data.paymentSessionId,
           orderAmount: data.orderAmount,
+          currency: data.currency,
           environment: data.environment,
         });
         if (data.pricing?.couponCode) {
@@ -402,7 +404,9 @@ export default function CashfreeCheckoutModal({
             <Lock className="size-4" />
             <span>
               {processingPayment
-                ? 'Connecting to Cashfree Gateway...'
+                ? 'Processing Cashfree Payment...'
+                : paymentSession?.currency === 'INR'
+                ? `Pay ₹${paymentSession.orderAmount} INR with Cashfree`
                 : `Pay $${totalDisplay} USD with Cashfree`}
             </span>
             <ArrowRight className="size-4 ml-1" />

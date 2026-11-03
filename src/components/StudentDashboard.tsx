@@ -103,8 +103,13 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
         search: searchQuery,
       });
 
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const res = await fetch(`/api/courses/dashboard?${params.toString()}`, {
         credentials: 'include',
+        headers,
       });
 
       if (res.ok) {
@@ -135,6 +140,12 @@ export default function StudentDashboard({ onBackToExplore }: StudentDashboardPr
 
   useEffect(() => {
     fetchDashboardData();
+
+    const handleUpdate = () => {
+      fetchDashboardData();
+    };
+    window.addEventListener('lms:enrollments-changed', handleUpdate);
+    return () => window.removeEventListener('lms:enrollments-changed', handleUpdate);
   }, [fetchDashboardData]);
 
   // Mark Lesson as Completed in backend

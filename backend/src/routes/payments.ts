@@ -3,7 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 import { authenticate } from '../middleware/auth.js';
 import { db, schema, isDatabaseConnected } from '../db/index.js';
-import { initialCourses, mockEnrollments, mockPurchases, getUserCourseProgress } from './courses.js';
+import { initialCourses, mockEnrollments, mockPurchases, getUserCourseProgress, enrollUserInCourse } from './courses.js';
 import {
   createCashfreeOrder,
   verifyCashfreeOrder,
@@ -162,11 +162,12 @@ router.post('/cashfree/create-order', authenticate, async (req: Request, res: Re
     const orderId = `iw_ord_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
     const orderAmount = Number((pricing.totalCents / 100).toFixed(2));
 
-    // Call Cashfree PG Orders API (FR-25)
+    // Call Cashfree PG Orders API (FR-25) with merchant account supported currency (defaults to INR)
+    const cfCurrency = (process.env.CASHFREE_CURRENCY || 'INR').trim().toUpperCase();
     const cashfreeRes = await createCashfreeOrder({
       orderId,
       orderAmount,
-      orderCurrency: 'USD',
+      orderCurrency: cfCurrency,
       customerId: userId,
       customerEmail: req.user!.email,
       customerName: req.user!.name,
@@ -262,17 +263,8 @@ router.post('/cashfree/webhook', async (req: Request, res: Response) => {
       }
 
       if (courseId && userId) {
-        // Create active enrollment in database (idempotent check)
-        const alreadyEnrolled = mockEnrollments.some((e) => e.userId === userId && e.courseId === courseId && e.status === 'active');
-        if (!alreadyEnrolled) {
-          mockEnrollments.push({
-            id: 'enr_' + Date.now().toString(36),
-            userId,
-            courseId,
-            status: 'active',
-            enrolledDate: new Date(),
-          });
-        }
+        // Create active enrollment in Neon database & mock store (idempotent check)
+        await enrollUserInCourse(userId, courseId, existingPurchase?.id);
 
         // Initialize course progress
         const course = initialCourses.find((c) => c.id === courseId);
@@ -334,16 +326,7 @@ router.get('/cashfree/verify-order/:orderId', authenticate, async (req: Request,
     if (verification.orderStatus === 'PAID' || purchase?.status === 'paid') {
       if (purchase) purchase.status = 'paid';
 
-      const alreadyEnrolled = mockEnrollments.some((e) => e.userId === userId && e.courseId === course.id && e.status === 'active');
-      if (!alreadyEnrolled) {
-        mockEnrollments.push({
-          id: 'enr_' + Date.now().toString(36),
-          userId,
-          courseId: course.id,
-          status: 'active',
-          enrolledDate: new Date(),
-        });
-      }
+      await enrollUserInCourse(userId, course.id, purchase?.id);
 
       // Initialize progress
       getUserCourseProgress(userId, course, true);
@@ -407,17 +390,8 @@ router.post('/cashfree/simulate-pay', authenticate, async (req: Request, res: Re
     if (mockOrder) mockOrder.orderStatus = 'PAID';
     if (purchase) purchase.status = 'paid';
 
-    // Idempotent enrollment (FR-28)
-    const alreadyEnrolled = mockEnrollments.some((e) => e.userId === userId && e.courseId === course.id && e.status === 'active');
-    if (!alreadyEnrolled) {
-      mockEnrollments.push({
-        id: 'enr_' + Date.now().toString(36),
-        userId,
-        courseId: course.id,
-        status: 'active',
-        enrolledDate: new Date(),
-      });
-    }
+    // Idempotent enrollment across Neon DB & mock store (FR-28)
+    await enrollUserInCourse(userId, course.id, purchase?.id);
 
     getUserCourseProgress(userId, course, true);
 
